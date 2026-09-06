@@ -2,7 +2,7 @@ import maplibregl, { type ExpressionSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, FeatureCollection, LineString, Polygon, Position } from 'geojson';
 import type { Footprint, Kind, Plot, Props } from './types';
-import { CITY, COMMERCIAL_USES, CROPS, FLOOR_HEIGHT, FLYOVER_HEIGHT, GREY, HIDDEN, MAP_STYLE, MAX_PLANTS, MAX_TREES, NIGHT_STYLE, ROOF_COLOURS, SATELLITE_ATTRIBUTION, SATELLITE_TILES, TREE_M2, cropStage, hoardingActive, lineWidth } from './config';
+import { CITY, CIVIC_SHORT, COMMERCIAL_USES, CROPS, FLOOR_HEIGHT, FLYOVER_HEIGHT, GREY, HIDDEN, MAP_STYLE, MAX_PLANTS, MAX_TREES, NIGHT_STYLE, ROOF_COLOURS, SATELLITE_ATTRIBUTION, SATELLITE_TILES, TREE_M2, cropStage, hoardingActive, lineWidth } from './config';
 import { centroid, circleRing, darken, insetRing, lineSegments, ringAreaM2, scatterInRing, seeded } from './geo';
 
 export interface WorldProps {
@@ -24,6 +24,8 @@ export interface WorldProps {
   props: Props;
   hoarding: string | null;
   sign: string | null;
+  civic: string | null; // civic subtype label for the marker
+  resolved: boolean;
   owner_name: string | null;
   built: boolean;
   hidden: boolean;
@@ -94,7 +96,7 @@ export class WorldMap {
         id, kind, neighbourhood,
         osm_floors: null, osm_name: null, osm_building: null, line: null,
         floors: 1, colour: null, wall: null, ground: null, commercial: false, name: null, roof: null, style: null, props: {},
-        hoarding: null, sign: null, owner_name: null, built: false, hidden: false, provisional: false,
+        hoarding: null, sign: null, civic: null, resolved: false, owner_name: null, built: false, hidden: false, provisional: false,
         ...extra,
       },
     };
@@ -156,7 +158,7 @@ export class WorldMap {
     this.map.addLayer({ id: 'flyover-flat', type: 'fill', source: 'world', filter: kind('flyover'), paint: { 'fill-color': '#dedede' } });
     this.map.addLayer({ id: 'flyover-flat-line', type: 'line', source: 'world', filter: all(kind('flyover'), not(built)), paint: { 'line-color': '#b9b9b9', 'line-width': 1, 'line-dasharray': [2, 2] } });
     this.map.addLayer({ id: 'tree-fill', type: 'fill', source: 'world', filter: kind('tree'), paint: { 'fill-color': '#8fbf7a', 'fill-opacity': ['case', hidden, 0.3, 0.6] } });
-    this.map.addLayer({ id: 'point-fill', type: 'fill', source: 'world', filter: kind('landmark', 'furniture'), paint: { 'fill-color': '#d9d2c5', 'fill-opacity': ['case', hidden, 0.2, 0.45] } });
+    this.map.addLayer({ id: 'point-fill', type: 'fill', source: 'world', filter: kind('landmark', 'furniture', 'civic'), paint: { 'fill-color': ['case', ['==', ['get', 'kind'], 'civic'], ['case', ['boolean', ['get', 'resolved'], false], '#8ab17d', '#e07a5f'], '#d9d2c5'], 'fill-opacity': ['case', hidden, 0.2, 0.45] } });
     this.map.addLayer({ id: 'rail-fill', type: 'fill', source: 'world', filter: kind('railway'), paint: { 'fill-color': ['case', built, '#5f5a55', '#e6e2dc'], 'fill-opacity': ['case', hidden, 0.3, 0.95] } });
     this.map.addLayer({ id: 'rail-sleepers', type: 'line', source: 'lines', filter: ['==', ['get', 'kind'], 'railway'], paint: { 'line-color': '#8a7a66', 'line-width': ['interpolate', ['linear'], ['zoom'], 15, 3, 18, 12], 'line-dasharray': [0.4, 0.8] } });
     this.map.addLayer({ id: 'rail-line', type: 'line', source: 'lines', filter: ['==', ['get', 'kind'], 'railway'], paint: { 'line-color': '#c9c9c9', 'line-width': ['interpolate', ['linear'], ['zoom'], 15, 1, 18, 2] } });
@@ -198,6 +200,9 @@ export class WorldMap {
     this.map.addLayer({ id: 'signs', type: 'symbol', source: 'world', minzoom: 16.5, filter: all(['to-boolean', ['get', 'sign']], not(hidden)), layout: {
       'text-field': ['get', 'sign'], 'text-font': ['Noto Sans Bold'], 'text-size': 10, 'text-max-width': 10, 'text-offset': [0, 1.5], 'text-padding': 2, 'symbol-sort-key': 2,
     }, paint: { 'text-color': '#1b1b1b', 'text-halo-color': '#fff3c4', 'text-halo-width': 1.6 } });
+    this.map.addLayer({ id: 'civic-labels', type: 'symbol', source: 'world', minzoom: 14, filter: all(['to-boolean', ['get', 'civic']], not(hidden)), layout: {
+      'text-field': ['get', 'civic'], 'text-font': ['Noto Sans Bold'], 'text-size': 11, 'text-offset': [0, -1.9], 'text-padding': 4, 'symbol-sort-key': 0, 'text-allow-overlap': true,
+    }, paint: { 'text-color': ['case', ['boolean', ['get', 'resolved'], false], '#2f6f5a', '#b4532f'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
     this.map.addLayer({ id: 'hoardings', type: 'symbol', source: 'world', minzoom: 14.5, filter: all(['to-boolean', ['get', 'hoarding']], not(hidden)), layout: {
       'text-field': ['upcase', ['get', 'hoarding']], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-max-width': 12, 'text-offset': [0, -2.2], 'text-padding': 6, 'symbol-sort-key': -1,
     }, paint: { 'text-color': '#ffd166', 'text-halo-color': '#1b1b1b', 'text-halo-width': 2 } });
@@ -392,6 +397,13 @@ export class WorldMap {
         tree(centroid(ring), seeded(p.id), true);
       } else if (p.kind === 'landmark' || p.kind === 'furniture') {
         model(p.kind, p.props.subtype, centroid(ring));
+      } else if (p.kind === 'civic') {
+        // a marker pole with a coloured head: orange while open, green once fixed
+        const c = centroid(ring);
+        const head = p.resolved ? '#3d8b6e' : '#e07a5f';
+        add(circleRing(c, 0.18, 6), { dk: 'model', base: 0, height: 4.2, colour: '#4a4f57' });
+        add(circleRing(c, 0.8, 8), { dk: 'model', base: 4.2, height: 5.6, colour: head });
+        add(circleRing(c, 1.6, 10), { dk: 'glow', base: 0, height: 0.05, colour: head });
       } else if (p.kind === 'park' || p.kind === 'playground') {
         const density = p.props.trees ?? (p.kind === 'playground' ? 'sparse' : 'normal');
         const n = Math.min(MAX_TREES, Math.max(1, Math.round(ringAreaM2(ring) / (TREE_M2[density] ?? 220))));
@@ -447,6 +459,8 @@ export class WorldMap {
     p.ground = p.wall ? darken(p.wall, 0.7) : darken(GREY, 0.8);
     p.hoarding = hoardingActive(b.props ?? {}) ? b.props.hoarding! : null;
     p.sign = b.props?.sign ?? null;
+    p.civic = b.kind === 'civic' ? (CIVIC_SHORT[b.props?.subtype ?? ''] ?? 'Issue') : null;
+    p.resolved = !!b.props?.resolved_at;
     p.owner_name = b.owner_name;
     p.built = true;
     p.hidden = b.hidden;
@@ -509,15 +523,17 @@ export class WorldMap {
   }
 
   /** Per-neighbourhood totals for the leaderboard. */
-  stats(): { neighbourhood: string; total: number; built: number }[] {
-    const m = new Map<string, { total: number; built: number }>();
+  stats(): { neighbourhood: string; total: number; built: number; civic: number }[] {
+    const m = new Map<string, { total: number; built: number; civic: number }>();
     for (const f of this.features.values()) {
       const n = f.properties.neighbourhood;
-      const s = m.get(n) ?? { total: 0, built: 0 };
+      const s = m.get(n) ?? { total: 0, built: 0, civic: 0 };
+      if (f.properties.kind === 'civic') { if (f.properties.built && !f.properties.hidden && !f.properties.resolved) s.civic++; m.set(n, s); continue; }
       s.total++;
       if (f.properties.built && !f.properties.hidden) s.built++;
       m.set(n, s);
     }
     return [...m.entries()].map(([neighbourhood, s]) => ({ neighbourhood, ...s }));
   }
+  builtIn(neighbourhood: string): number { let n = 0; for (const f of this.features.values()) if (f.properties.neighbourhood === neighbourhood && f.properties.built && !f.properties.hidden && f.properties.kind !== 'civic') n++; return n; }
 }

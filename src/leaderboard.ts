@@ -28,7 +28,7 @@ export class Leaderboard {
           <li>
             <span class="rank">${i + 1}</span>
             <div class="grow">
-              <div class="line"><a href="#" data-act="go" data-n="${esc(r.neighbourhood)}">${esc(r.neighbourhood)}</a><span>${r.built}/${r.total} · ${pct(r)}%</span></div>
+              <div class="line"><a href="#" data-act="go" data-n="${esc(r.neighbourhood)}">${esc(r.neighbourhood)}</a><span>${r.built}/${r.total} · ${pct(r)}%${r.civic ? ` · <span class="civic-n" title="open civic reports">${r.civic} open</span>` : ''} · <a href="#" data-act="board" data-n="${esc(r.neighbourhood)}">board</a></span></div>
               <div class="bar"><i style="width:${pct(r)}%"></i></div>
             </div>
             <button class="btn icon" title="Share card" data-act="share" data-n="${esc(r.neighbourhood)}"><span class="ms">share</span></button>
@@ -45,6 +45,7 @@ export class Leaderboard {
     ev.preventDefault();
     const n = btn.dataset.n ?? '';
     if (btn.dataset.act === 'close') this.el.hidden = true;
+    else if (btn.dataset.act === 'board') { this.el.hidden = true; window.dispatchEvent(new CustomEvent('tw:board', { detail: n })); }
     else if (btn.dataset.act === 'wish') { this.el.hidden = true; document.querySelector<HTMLElement>('#profile [data-act="wish"]')?.click() ?? window.dispatchEvent(new CustomEvent('tw:wish')); }
     else if (btn.dataset.act === 'go') {
       const p = this.places.find((x) => x.name === n);

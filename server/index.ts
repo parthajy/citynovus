@@ -16,8 +16,9 @@ import type { Polygon, Position } from 'geojson';
 import { openDb, type Queryable } from './db';
 import { World } from './world';
 import {
-  DEFAULT_FLAG_MIN_POINTS, KINDS, RATE_LIMIT_PER_MIN, RuleError, STARTING_COINS, applyBuy, applyConfirm, applyEdit, applyFlag, applyHarvest,
-  applyHoarding, applyPlant, canUndo, checkPlacement, checkSize, newPoint, pointRing, type EditContext, type EditInput, type Kind, type Outcome, type Player, type Plot,
+  ABANDON_DAYS, BOARD_MIN_POINTS, DEFAULT_FLAG_MIN_POINTS, KINDS, NOTES_MIN_POINTS, OFFER_DAYS, POINTS, RATE_LIMIT_PER_MIN, RuleError, STARTING_COINS, STREAK_BONUS, STREAK_CAP,
+  applyBuy, applyConfirm, applyEdit, applyFlag, applyHarvest, applyHoarding, applyPlant, applyResolve, applySaleTerms, applyShield, canUndo, checkNote, checkOffer, checkPlacement, checkSize,
+  demandFor, newPoint, pointRing, settleSale, type EditContext, type EditInput, type Kind, type Outcome, type Player, type Plot, type SaleStatus,
 } from '../shared/rules';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,12 @@ const db = await openDb();
 const world = new World(process.env.WORLD_FILE ?? path.join(ROOT, 'public/data/world.geojson'), process.env.PLACES_FILE ?? path.join(ROOT, 'public/data/places.json'));
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, bodyLimit: 512 * 1024, trustProxy: true });
 await app.register(cookie);
+// An empty body with a JSON content type is a common client slip; treat it as {}.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  const text = typeof body === 'string' ? body : body.toString();
+  if (!text.trim()) return done(null, {});
+  try { done(null, JSON.parse(text)); } catch { done(new HttpError(400, 'Bad JSON body.'), undefined); }
+});
 await app.register(compress, { global: true });
 await app.register(fastifyRateLimit, { global: true, max: Number(process.env.RATE_LIMIT_PER_IP_PER_MIN ?? 300), timeWindow: '1 minute', allowList: (req) => req.url === '/api/events' });
 await app.register(multipart, { limits: { fileSize: 4 * 1024 * 1024, files: 1 } });
@@ -58,7 +65,9 @@ const ip = (req: FastifyRequest) => (req.ip || '').slice(0, 64);
 class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const bad = (msg: string) => new HttpError(400, msg);
 
-const PLOT_COLS = 'id, kind, neighbourhood, geometry, floors, colour, style, roof, name, "use", photo_url, props, built_by_id, built_by_name, owner_id, owner_name, last_edit_by_name, confirmations, flag_score, hidden, provisional, created_at, updated_at';
+const PLOT_COLS = 'id, kind, neighbourhood, geometry, floors, colour, style, roof, name, "use", photo_url, props, built_by_id, built_by_name, owner_id, owner_name, last_edit_by_name, confirmations, flag_score, hidden, provisional, sale_status, sale_price, created_at, updated_at';
+/** Plot columns plus whether the owner has gone quiet long enough for the abandonment rule. */
+const PLOT_SELECT = `select ${PLOT_COLS.split(', ').map((c) => 'p.' + c).join(', ')}, coalesce(o.last_seen < now() - interval '${ABANDON_DAYS} days', false) as abandoned from plots p left join players o on o.id = p.owner_id`;
 function rowToPlot(r: Record<string, unknown>): Plot {
   const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
   return {
@@ -66,6 +75,9 @@ function rowToPlot(r: Record<string, unknown>): Plot {
     geometry: (r.geometry as Polygon | null) ?? null,
     props: (r.props as Plot['props']) ?? {},
     flag_score: Number(r.flag_score),
+    sale_status: ((r.sale_status as string) ?? 'none') as SaleStatus,
+    sale_price: r.sale_price === null || r.sale_price === undefined ? null : Number(r.sale_price),
+    abandoned: !!r.abandoned,
     created_at: iso(r.created_at),
     updated_at: iso(r.updated_at),
   };
@@ -74,17 +86,39 @@ function rowToPlayer(r: Record<string, unknown>): Player & { verified?: boolean;
   return { id: String(r.id), name: (r.name as string | null) ?? null, points: Number(r.points), coins: Number(r.coins), email: (r.email as string | null) ?? null, verified: !!r.verified, banned: !!r.banned };
 }
 async function savePlot(q: Queryable, p: Plot) {
-  await q.query(
-    `insert into plots (${PLOT_COLS}) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
-     on conflict (id) do update set kind=$2, neighbourhood=$3, geometry=$4, floors=$5, colour=$6, style=$7, roof=$8, name=$9, "use"=$10, photo_url=$11, props=$12,
-       built_by_id=$13, built_by_name=$14, owner_id=$15, owner_name=$16, last_edit_by_name=$17, confirmations=$18, flag_score=$19, hidden=$20, provisional=$21, created_at=$22, updated_at=$23`,
-    [p.id, p.kind, p.neighbourhood, p.geometry ? JSON.stringify(p.geometry) : null, p.floors, p.colour, p.style, p.roof, p.name, p.use, p.photo_url, JSON.stringify(p.props),
-     p.built_by_id, p.built_by_name, p.owner_id, p.owner_name, p.last_edit_by_name, p.confirmations, p.flag_score, p.hidden, !!p.provisional, p.created_at, p.updated_at],
-  );
+  const cols = PLOT_COLS.split(', ');
+  const vals = [p.id, p.kind, p.neighbourhood, p.geometry ? JSON.stringify(p.geometry) : null, p.floors, p.colour, p.style, p.roof, p.name, p.use, p.photo_url, JSON.stringify(p.props),
+    p.built_by_id, p.built_by_name, p.owner_id, p.owner_name, p.last_edit_by_name, p.confirmations, p.flag_score, p.hidden, !!p.provisional, p.sale_status ?? 'none', p.sale_price ?? null, p.created_at, p.updated_at];
+  const params = cols.map((_, i) => `$${i + 1}`).join(',');
+  const updates = cols.slice(1).map((c, i) => `${c}=$${i + 2}`).join(', ');
+  await q.query(`insert into plots (${PLOT_COLS}) values (${params}) on conflict (id) do update set ${updates}`, vals);
 }
 async function getPlot(q: Queryable, id: string): Promise<Plot | null> {
-  const r = await q.query(`select ${PLOT_COLS} from plots where id = $1`, [id]);
+  const r = await q.query(`${PLOT_SELECT} where p.id = $1`, [id]);
   return r[0] ? rowToPlot(r[0]) : null;
+}
+async function demandOf(q: Queryable, neighbourhood: string): Promise<number> {
+  const r = await q.query<{ n: string }>('select count(*) as n from plots where neighbourhood = $1 and not provisional', [neighbourhood]);
+  return demandFor(Number(r[0]?.n ?? 0));
+}
+async function notify(q: Queryable, playerId: string | null, type: string, text: string, plotId: string | null = null, offerId: number | null = null) {
+  if (!playerId || playerId === 'u_system') return;
+  await q.query('insert into notifications (player_id, type, text, plot_id, offer_id) values ($1,$2,$3,$4,$5)', [playerId, type, text.slice(0, 300), plotId, offerId]);
+}
+async function treasuryAdd(q: Queryable, coins: number, reason: string, plotId: string | null) {
+  if (!coins) return;
+  await q.query('update treasury set balance = balance + $1 where id = 1', [coins]);
+  await q.query('insert into ledger (player_id, delta_points, delta_coins, reason, plot_id) values ($1,0,$2,$3,$4)', ['treasury', coins, reason, plotId]);
+}
+/** Pay everyone a sale touches; returns the buyer's updated player. */
+async function payout(q: Queryable, st: ReturnType<typeof settleSale>, buyer: Player, price: number, reason: string) {
+  await savePlot(q, st.plot);
+  const player = await credit(q, buyer.id, POINTS.buy, -price, reason, st.plot.id);
+  if (st.ownerId && st.ownerCoins) { await credit(q, st.ownerId, 0, st.ownerCoins, 'sold', st.plot.id); await notify(q, st.ownerId, 'sold', `${buyer.name} bought ${st.plot.name || 'your ' + st.plot.kind} for ${price} NC. You received ${st.ownerCoins} NC.`, st.plot.id); }
+  if (st.builderId && st.builderCoins) { await credit(q, st.builderId, 0, st.builderCoins, 'royalty', st.plot.id); await notify(q, st.builderId, 'royalty', `Builder's royalty: ${st.builderCoins} NC from the sale of ${st.plot.name || 'a ' + st.plot.kind} you built.`, st.plot.id); }
+  await treasuryAdd(q, st.treasury, 'sale_cut', st.plot.id);
+  broadcast(st.plot);
+  return player;
 }
 async function getPlayer(q: Queryable, id: string): Promise<(Player & { verified?: boolean; banned?: boolean }) | null> {
   const r = await q.query('select id, name, email, points, coins, verified, banned from players where id = $1', [id]);
@@ -122,7 +156,7 @@ async function adoptGuest(guestId: string, accountId: string, name: string) {
   await db.query('update ledger set player_id = $2 where player_id = $1', [guestId, accountId]);
   await db.query('delete from wishlist where player_id = $1 and city_key in (select city_key from wishlist where player_id = $2)', [guestId, accountId]);
   await db.query('update wishlist set player_id = $2 where player_id = $1', [guestId, accountId]);
-  for (const r of (await db.query(`select ${PLOT_COLS} from plots where owner_id = $1`, [accountId])).map(rowToPlot)) broadcast(r);
+  for (const r of (await db.query(`${PLOT_SELECT} where p.owner_id = $1`, [accountId])).map(rowToPlot)) broadcast(r);
 }
 /** Provisional work that was never saved goes away. Runs every ten minutes. */
 async function expireProvisional() {
@@ -132,6 +166,15 @@ async function expireProvisional() {
     await db.query('delete from plots where id = $1', [id]);
   }
   if (old.length) app.log.info(`expired ${old.length} provisional plots`);
+  // offers nobody answered go back to their makers
+  for (const of of await db.query<{ id: number; plot_id: string; buyer_id: string; amount: number }>(`select id, plot_id, buyer_id, amount from offers where status = 'pending' and created_at < now() - interval '${OFFER_DAYS} days'`)) {
+    await db.query(`update offers set status = 'expired', decided_at = now() where id = $1`, [of.id]);
+    await credit(db, of.buyer_id, 0, Number(of.amount), 'offer_refund', of.plot_id);
+    await notify(db, of.buyer_id, 'offer_expired', `Your ${of.amount} NC offer was not answered in ${OFFER_DAYS} days. Coins returned.`, of.plot_id, of.id);
+  }
+  // civic reports: fixed ones leave after two days, ignored ones after thirty
+  const gone = await db.query<{ id: string }>(`select id from plots where kind = 'civic' and ((props->>'resolved_at') is not null and (props->>'resolved_at')::timestamptz < now() - interval '2 days' or (confirmations = 0 and created_at < now() - interval '30 days'))`);
+  for (const { id } of gone) { for (const t of ['confirmations', 'flags', 'edits', 'notes']) await db.query(`delete from ${t} where plot_id = $1`, [id]); await db.query('delete from plots where id = $1', [id]); const line = `data: ${JSON.stringify({ id, deleted: true })}\n\n`; for (const st of streams) { try { st.raw.write(line); } catch { streams.delete(st); } } }
   return old.length;
 }
 setInterval(() => { expireProvisional().catch((e) => app.log.error(e)); }, 10 * 60_000).unref();
@@ -223,14 +266,27 @@ app.setErrorHandler((err, _req, reply) => {
 });
 
 app.get('/api/session', async (req) => {
-  const player = await identify(req, true);
+  let player = await identify(req, true);
+  let streak = 0, streakBonus = 0;
+  if (player) {
+    // Daily streak: a small Novus Coins bonus for coming back, growing to a cap.
+    const day = IST_DAY(), yesterday = IST_DAY(new Date(Date.now() - 86400_000));
+    const r = (await db.query<{ streak: number; streak_day: string | null }>('select streak, streak_day from players where id = $1', [player.id]))[0];
+    if (r && r.streak_day !== day) {
+      streak = r.streak_day === yesterday ? Number(r.streak) + 1 : 1;
+      streakBonus = STREAK_BONUS * Math.min(streak, STREAK_CAP);
+      await db.query('update players set streak = $2, streak_day = $3 where id = $1', [player.id, streak, day]);
+      player = { ...(await credit(db, player.id, 0, streakBonus, 'streak', null)), verified: player.verified, banned: player.banned };
+    } else streak = Number(r?.streak ?? 0);
+  }
   const loggedIn = !!player && player.id.startsWith('u_');
   const { verified, banned, ...pub } = player ?? ({} as never);
   void banned;
   const avatar = player ? (await db.query<{ avatar: string | null }>('select avatar from players where id = $1', [player.id]))[0]?.avatar ?? null : null;
   const unsaved = player && isGuest(player.id) ? Number((await db.query<{ n: string }>('select count(*) as n from plots where owner_id = $1 and provisional', [player.id]))[0]?.n ?? 0) : 0;
   return { player: player ? { ...pub, avatar } : null, loggedIn, verified: !!verified, requireLogin: REQUIRE_LOGIN, requireVerified: REQUIRE_VERIFIED, flagMinPoints: FLAG_MIN_POINTS,
-    authMethods: { google: GOOGLE_AUTH, password: PASSWORD_AUTH }, provisionalHours: PROVISIONAL_TTL_HOURS, unsaved, admin: !!player?.email && ADMIN_EMAILS.includes(player.email.toLowerCase()) };
+    authMethods: { google: GOOGLE_AUTH, password: PASSWORD_AUTH }, provisionalHours: PROVISIONAL_TTL_HOURS, unsaved, admin: !!player?.email && ADMIN_EMAILS.includes(player.email.toLowerCase()),
+    streak, streakBonus, unread: player ? Number((await db.query<{ n: string }>('select count(*) as n from notifications where player_id = $1 and not read', [player.id]))[0]?.n ?? 0) : 0 };
 });
 
 // ---------- Google sign-in ----------
@@ -272,8 +328,10 @@ app.get<{ Querystring: { code?: string; state?: string; mock?: string; mock_emai
   const name = (acct?.name || profile.name).slice(0, 24);
   if (!acct) {
     const id = 'u_' + randomBytes(12).toString('hex');
-    // A guest brings their own coins along; a brand-new player gets the starting purse.
-    await db.query('insert into players (id, name, email, google_sub, avatar, verified, points, coins, ip) values ($1,$2,$3,$4,$5,true,0,$6,$7)', [id, name, profile.email, profile.sub, profile.picture, guest ? 0 : STARTING_COINS, ip(req)]);
+    // A guest brings their own coins along; a brand-new player, or one whose guest has nothing to carry, gets the starting purse.
+    const g = guest ? await getPlayer(db, guest) : null;
+    const fresh = !g || (g.coins === 0 && g.points === 0);
+    await db.query('insert into players (id, name, email, google_sub, avatar, verified, points, coins, ip) values ($1,$2,$3,$4,$5,true,0,$6,$7)', [id, name, profile.email, profile.sub, profile.picture, fresh ? STARTING_COINS : 0, ip(req)]);
     acct = { id, name };
     await db.query('insert into events (player_id, name, ip) values ($1, $2, $3)', [id, 'register', ip(req)]);
   } else {
@@ -399,7 +457,7 @@ app.post('/api/auth/logout', async (req, reply) => {
 
 app.get('/api/plots', async (req) => {
   const me = await identify(req, false);
-  return (await db.query(`select ${PLOT_COLS} from plots where not provisional or owner_id = $1`, [me?.id ?? ''])).map(rowToPlot);
+  return (await db.query(`${PLOT_SELECT} where not p.provisional or p.owner_id = $1`, [me?.id ?? ''])).map(rowToPlot);
 });
 app.post('/api/admin/expire', async (req) => { await requireAdminAsync(req); return { expired: await expireProvisional() }; });
 // A session for the house account, so seeding and official content are never provisional.
@@ -456,7 +514,7 @@ app.post<{ Params: { id: string }; Body: { photo_url?: string | null } }>('/api/
     const o = applyConfirm(p, me, !!already, photo);
     await q.query('insert into confirmations (plot_id, player_id) values ($1,$2)', [p.id, me.id]);
     const r = await commit(q, me, o, photo ? 'confirm_photo' : 'confirm');
-    if (p.owner_id && p.owner_id !== me.id) await credit(q, p.owner_id, photo ? 15 : 5, photo ? 15 : 5, 'confirmed', p.id);
+    if (p.owner_id && p.owner_id !== me.id) { await credit(q, p.owner_id, photo ? 15 : 5, photo ? 15 : 5, 'confirmed', p.id); await notify(q, p.owner_id, 'confirmed', `${me.name} ${photo ? 'photo-verified' : 'confirmed'} ${p.name || 'your ' + p.kind}. +${photo ? 15 : 5} NC.`, p.id); }
     return r;
   });
 });
@@ -494,7 +552,7 @@ app.post<{ Params: { id: string } }>('/api/plots/:id/undo', async (req) => {
 app.get('/api/activity', async () => db.query(
   `select l.created_at as time, pl.name as player, l.reason, l.plot_id, p.name as plot_name, p.kind, p.neighbourhood
      from ledger l left join players pl on pl.id = l.player_id left join plots p on p.id = l.plot_id
-    where l.reason in ('claim','edit','buy','harvest','confirm','confirm_photo','tree','landmark','furniture','hoarding','plant') and (p.id is null or not p.provisional)
+    where l.reason in ('claim','edit','buy','bought','harvest','confirm','confirm_photo','tree','landmark','furniture','civic','resolve','hoarding','plant') and (p.id is null or not p.provisional)
     order by l.id desc limit 40`,
 ));
 
@@ -519,7 +577,7 @@ app.get<{ Querystring: { filter?: string } }>('/api/admin/plots', async (req) =>
   await requireAdminAsync(req);
   const f = req.query.filter ?? 'flagged';
   const where = f === 'hidden' ? 'where hidden' : f === 'flagged' ? 'where flag_score > 0' : '';
-  return (await db.query(`select ${PLOT_COLS} from plots ${where} order by updated_at desc limit 100`)).map(rowToPlot);
+  return (await db.query(`${PLOT_SELECT} ${where.replace('where ', 'where p.')} order by p.updated_at desc limit 100`)).map(rowToPlot);
 });
 app.post<{ Params: { id: string }; Body: { action?: string; name?: string } }>('/api/admin/plots/:id', async (req) => {
   await requireAdminAsync(req);
@@ -542,6 +600,21 @@ app.post<{ Params: { id: string }; Body: { banned?: boolean } }>('/api/admin/pla
   await adminLog(req.body?.banned ? 'ban' : 'unban', req.params.id);
   return { ok: true };
 });
+app.get('/api/admin/civic.csv', async (req, reply) => {
+  await requireAdminAsync(req);
+  const rows = await db.query<Record<string, unknown>>(`select id, neighbourhood, props->>'subtype' as type, geometry, name, photo_url, confirmations, props->>'resolved_at' as resolved_at, created_at, owner_name from plots where kind = 'civic' order by created_at desc`);
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = ['ward,type,lat,lon,details,photo,confirmations,status,reported_at,reported_by'];
+  for (const r of rows) {
+    const ring = (r.geometry as { coordinates: number[][][] } | null)?.coordinates?.[0] ?? [];
+    const lon = ring.length ? ring.reduce((a, p) => a + p[0], 0) / ring.length : '', lat = ring.length ? ring.reduce((a, p) => a + p[1], 0) / ring.length : '';
+    lines.push([r.neighbourhood, r.type, typeof lat === 'number' ? lat.toFixed(6) : '', typeof lon === 'number' ? lon.toFixed(6) : '', r.name, r.photo_url ? `${PUBLIC_URL}${r.photo_url}` : '', r.confirmations, r.resolved_at ? 'resolved' : 'open', r.created_at, r.owner_name].map(esc).join(','));
+  }
+  return reply.type('text/csv').header('Content-Disposition', 'attachment; filename="citynovus-civic.csv"').send(lines.join('\n'));
+});
+app.get('/api/admin/notes', async (req) => { await requireAdminAsync(req); return db.query('select id, plot_id, board, player_name, text, hidden, created_at from notes order by id desc limit 100'); });
+app.post<{ Params: { id: string }; Body: { hidden?: boolean } }>('/api/admin/notes/:id', async (req) => { await requireAdminAsync(req); await db.query('update notes set hidden = $2 where id = $1', [Number(req.params.id), !!req.body?.hidden]); await adminLog(req.body?.hidden ? 'hide_note' : 'show_note', req.params.id); return { ok: true }; });
+app.post<{ Params: { id: string }; Body: { days?: number } }>('/api/admin/players/:id/touch', async (req) => { await requireAdminAsync(req); await db.query(`update players set last_seen = now() - ($2 || ' days')::interval where id = $1`, [req.params.id, String(Number(req.body?.days ?? 0))]); return { ok: true }; });
 app.get('/api/admin/log', async (req) => { await requireAdminAsync(req); return db.query('select * from admin_log order by id desc limit 100'); });
 app.get('/api/admin/metrics', async (req) => {
   await requireAdminAsync(req);
@@ -631,7 +704,171 @@ app.post<{ Params: { id: string } }>('/api/plots/:id/buy', async (req) => {
   requireAccount(me, 'buy');
   return db.tx(async (q) => {
     const p = await getPlot(q, req.params.id); if (!p) throw bad('Nothing to buy yet. Colour it in and it is yours.');
-    return commit(q, me, applyBuy(p, me, now()), 'buy');
+    const o = applyBuy(p, me, now(), await demandOf(q, p.neighbourhood));
+    const player = await payout(q, o.settlement, me, -o.coins, 'buy');
+    // any offers still pending on it go back to their makers
+    for (const of of await q.query<{ id: number; buyer_id: string; amount: number }>(`select id, buyer_id, amount from offers where plot_id = $1 and status = 'pending'`, [p.id])) {
+      await q.query(`update offers set status = 'declined', decided_at = now() where id = $1`, [of.id]);
+      await credit(q, of.buyer_id, 0, Number(of.amount), 'offer_refund', p.id);
+      await notify(q, of.buyer_id, 'offer_declined', `Your offer on ${p.name || 'a ' + p.kind} was returned: it sold to someone else.`, p.id, of.id);
+    }
+    return { plot: o.settlement.plot, player, gained: POINTS.buy };
+  });
+});
+
+// ---------- market: terms, offers, shields ----------
+app.post<{ Params: { id: string }; Body: { status?: SaleStatus; price?: number } }>('/api/plots/:id/sale', async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'sell');
+  return db.tx(async (q) => {
+    const p = await getPlot(q, req.params.id); if (!p) throw bad('Claim it first.');
+    const st = (['none', 'price', 'offers'] as SaleStatus[]).includes(req.body?.status as SaleStatus) ? (req.body!.status as SaleStatus) : 'none';
+    return commit(q, me, applySaleTerms(p, me, st, Number(req.body?.price ?? 0) || null), 'sale_terms');
+  });
+});
+
+app.post<{ Params: { id: string }; Body: { amount?: number } }>('/api/plots/:id/offer', async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'make offers');
+  const amount = Math.round(Number(req.body?.amount ?? 0));
+  return db.tx(async (q) => {
+    const p = await getPlot(q, req.params.id); if (!p) throw bad('Nothing to offer on yet.');
+    checkOffer(p, me, amount);
+    const dup = await q.query(`select 1 from offers where plot_id = $1 and buyer_id = $2 and status = 'pending'`, [p.id, me.id]);
+    if (dup[0]) throw bad('You already have an offer waiting on this one. Cancel it to make a new one.');
+    const player = await credit(q, me.id, 0, -amount, 'offer_escrow', p.id);
+    const r = await q.query<{ id: number }>('insert into offers (plot_id, buyer_id, amount) values ($1,$2,$3) returning id', [p.id, me.id, amount]);
+    await notify(q, p.owner_id, 'offer', `${me.name} offers ${amount} NC for ${p.name || 'your ' + p.kind}.`, p.id, r[0].id);
+    return { ok: true, offerId: r[0].id, player };
+  });
+});
+
+async function offerDecision(req: FastifyRequest, action: 'accept' | 'decline' | 'cancel', id: number) {
+  const me = await requireActor(req);
+  return db.tx(async (q) => {
+    const of = (await q.query<{ id: number; plot_id: string; buyer_id: string; amount: number; status: string }>('select id, plot_id, buyer_id, amount, status from offers where id = $1', [id]))[0];
+    if (!of || of.status !== 'pending') throw bad('That offer is no longer open.');
+    const p = await getPlot(q, of.plot_id); if (!p) throw bad('The plot is gone.');
+    if (action === 'cancel') {
+      if (of.buyer_id !== me.id) throw new HttpError(403, 'Not your offer.');
+      await q.query(`update offers set status = 'cancelled', decided_at = now() where id = $1`, [id]);
+      const player = await credit(q, me.id, 0, Number(of.amount), 'offer_refund', p.id);
+      return { ok: true, player };
+    }
+    if (p.owner_id !== me.id) throw new HttpError(403, 'Only the owner decides.');
+    if (action === 'decline') {
+      await q.query(`update offers set status = 'declined', decided_at = now() where id = $1`, [id]);
+      await credit(q, of.buyer_id, 0, Number(of.amount), 'offer_refund', p.id);
+      await notify(q, of.buyer_id, 'offer_declined', `${me.name} declined your ${of.amount} NC offer on ${p.name || 'a ' + p.kind}. Coins returned.`, p.id, id);
+      return { ok: true, player: await getPlayer(q, me.id) };
+    }
+    const buyer = await getPlayer(q, of.buyer_id); if (!buyer) throw bad('The buyer is gone.');
+    const st = settleSale(p, buyer, Number(of.amount), now());
+    await q.query(`update offers set status = 'accepted', decided_at = now() where id = $1`, [id]);
+    // the buyer's coins were already held; settle from escrow, so no second charge
+    await savePlot(q, st.plot);
+    await credit(q, buyer.id, POINTS.buy, 0, 'bought', p.id);
+    if (st.ownerId && st.ownerCoins) await credit(q, st.ownerId, 0, st.ownerCoins, 'sold', p.id);
+    if (st.builderId && st.builderCoins) { await credit(q, st.builderId, 0, st.builderCoins, 'royalty', p.id); await notify(q, st.builderId, 'royalty', `Builder's royalty: ${st.builderCoins} NC from the sale of ${p.name || 'a ' + p.kind} you built.`, p.id); }
+    await treasuryAdd(q, st.treasury, 'sale_cut', p.id);
+    await notify(q, buyer.id, 'offer_accepted', `${me.name} accepted your ${of.amount} NC offer. ${p.name || 'The ' + p.kind} is yours.`, p.id, id);
+    for (const other of await q.query<{ id: number; buyer_id: string; amount: number }>(`select id, buyer_id, amount from offers where plot_id = $1 and status = 'pending' and id <> $2`, [p.id, id])) {
+      await q.query(`update offers set status = 'declined', decided_at = now() where id = $1`, [other.id]);
+      await credit(q, other.buyer_id, 0, Number(other.amount), 'offer_refund', p.id);
+      await notify(q, other.buyer_id, 'offer_declined', `Your offer on ${p.name || 'a ' + p.kind} was returned: it sold to someone else.`, p.id, other.id);
+    }
+    broadcast(st.plot);
+    return { ok: true, player: await getPlayer(q, me.id), plot: st.plot };
+  });
+}
+app.post<{ Params: { id: string } }>('/api/offers/:id/accept', async (req) => offerDecision(req, 'accept', Number(req.params.id)));
+app.post<{ Params: { id: string } }>('/api/offers/:id/decline', async (req) => offerDecision(req, 'decline', Number(req.params.id)));
+app.post<{ Params: { id: string } }>('/api/offers/:id/cancel', async (req) => offerDecision(req, 'cancel', Number(req.params.id)));
+app.get('/api/offers', async (req) => {
+  const me = await requireActor(req);
+  const made = await db.query(`select o.id, o.plot_id, o.amount, o.status, o.created_at, p.name as plot_name, p.kind, p.owner_name from offers o left join plots p on p.id = o.plot_id where o.buyer_id = $1 order by o.id desc limit 30`, [me.id]);
+  const received = await db.query(`select o.id, o.plot_id, o.amount, o.status, o.created_at, p.name as plot_name, p.kind, b.name as buyer_name from offers o join plots p on p.id = o.plot_id left join players b on b.id = o.buyer_id where p.owner_id = $1 and o.status = 'pending' order by o.id desc limit 30`, [me.id]);
+  return { made, received };
+});
+
+app.post<{ Params: { id: string } }>('/api/plots/:id/shield', async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'shield');
+  return db.tx(async (q) => { const p = await getPlot(q, req.params.id); if (!p) throw bad('Claim it first.'); return commit(q, me, applyShield(p, me, now()), 'shield'); });
+});
+
+// ---------- civic ----------
+app.post<{ Params: { id: string } }>('/api/plots/:id/resolve', async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'mark things fixed');
+  return db.tx(async (q) => {
+    const p = await getPlot(q, req.params.id); if (!p) throw bad('No such report.');
+    const o = applyResolve(p, me, now());
+    const r = await commit(q, me, o, 'resolve');
+    if (o.plot.props.resolved_at && p.owner_id) { await credit(q, p.owner_id, POINTS.resolvedBonus, POINTS.resolvedBonus, 'resolved', p.id); await notify(q, p.owner_id, 'resolved', `Your report (${p.props.subtype}) in ${p.neighbourhood} was marked fixed by three people. +${POINTS.resolvedBonus} NC.`, p.id); }
+    return r;
+  });
+});
+
+// ---------- notes and boards ----------
+app.get<{ Params: { id: string } }>('/api/plots/:id/notes', async (req) => db.query('select id, player_name, text, created_at from notes where plot_id = $1 and not hidden order by id desc limit 40', [req.params.id]));
+app.post<{ Params: { id: string }; Body: { text?: string } }>('/api/plots/:id/notes', { config: { rateLimit: { max: 30, timeWindow: '1 hour' } } }, async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'post notes');
+  const p = await getPlot(db, req.params.id); if (!p) throw bad('No such plot.');
+  const text = checkNote(String(req.body?.text ?? ''), me, NOTES_MIN_POINTS);
+  moderate(text, 'A note');
+  const r = await db.query<{ id: number }>('insert into notes (plot_id, player_id, player_name, text) values ($1,$2,$3,$4) returning id', [p.id, me.id, me.name, text]);
+  if (p.owner_id !== me.id) await notify(db, p.owner_id, 'note', `${me.name} left a note on ${p.name || 'your ' + p.kind}: "${text.slice(0, 80)}"`, p.id);
+  return { ok: true, id: r[0].id };
+});
+app.get<{ Params: { name: string } }>('/api/boards/:name', async (req) => db.query('select id, player_name, text, created_at from notes where board = $1 and not hidden order by id desc limit 60', [req.params.name.slice(0, 60)]));
+app.post<{ Params: { name: string }; Body: { text?: string } }>('/api/boards/:name', { config: { rateLimit: { max: 30, timeWindow: '1 hour' } } }, async (req) => {
+  const me = await requireActor(req);
+  requireAccount(me, 'post on boards');
+  const text = checkNote(String(req.body?.text ?? ''), me, BOARD_MIN_POINTS);
+  moderate(text, 'A post');
+  const r = await db.query<{ id: number }>('insert into notes (board, player_id, player_name, text) values ($1,$2,$3,$4) returning id', [req.params.name.slice(0, 60), me.id, me.name, text]);
+  return { ok: true, id: r[0].id };
+});
+
+// ---------- inbox, wallet, quests, treasury ----------
+app.get('/api/inbox', async (req) => {
+  const me = await requireActor(req);
+  const items = await db.query('select id, type, text, plot_id, offer_id, read, created_at from notifications where player_id = $1 order by id desc limit 50', [me.id]);
+  const unread = Number((await db.query<{ n: string }>('select count(*) as n from notifications where player_id = $1 and not read', [me.id]))[0]?.n ?? 0);
+  return { items, unread };
+});
+app.post('/api/inbox/read', async (req) => { const me = await requireActor(req); await db.query('update notifications set read = true where player_id = $1', [me.id]); return { ok: true }; });
+app.get('/api/me/ledger', async (req) => { const me = await requireActor(req); return db.query('select l.delta_points, l.delta_coins, l.reason, l.plot_id, p.name as plot_name, l.created_at from ledger l left join plots p on p.id = l.plot_id where l.player_id = $1 order by l.id desc limit 60', [me.id]); });
+app.get('/api/treasury', async () => ({ balance: Number((await db.query<{ balance: string }>('select balance from treasury where id = 1'))[0]?.balance ?? 0) }));
+
+const IST_DAY = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const QUESTS = [
+  { id: 'claim3', label: 'Colour in 3 grey buildings', need: 3, reasons: ['claim'], reward: 15 },
+  { id: 'tree2', label: 'Plant 2 trees', need: 2, reasons: ['tree'], reward: 10 },
+  { id: 'confirm2', label: "Confirm 2 neighbours' work", need: 2, reasons: ['confirm', 'confirm_photo'], reward: 10 },
+  { id: 'civic1', label: 'Report one civic issue', need: 1, reasons: ['civic'], reward: 10 },
+];
+async function questState(q: Queryable, playerId: string) {
+  const day = IST_DAY();
+  const rows = await q.query<{ reason: string; n: string }>(`select reason, count(*) as n from ledger where player_id = $1 and created_at >= ($2::date - interval '5 hours 30 minutes') and created_at < ($2::date + interval '18 hours 30 minutes') and delta_points > 0 group by reason`, [playerId, day]);
+  const counts: Record<string, number> = {}; for (const r of rows) counts[r.reason] = Number(r.n);
+  const claimed = new Set((await q.query<{ quest: string }>('select quest from quest_claims where player_id = $1 and day = $2', [playerId, day])).map((r) => r.quest));
+  return { day, quests: QUESTS.map((qu) => { const progress = Math.min(qu.need, qu.reasons.reduce((a, r) => a + (counts[r] ?? 0), 0)); return { id: qu.id, label: qu.label, need: qu.need, progress, reward: qu.reward, done: progress >= qu.need, claimed: claimed.has(qu.id) }; }) };
+}
+app.get('/api/quests', async (req) => { const me = await requireActor(req); return questState(db, me.id); });
+app.post<{ Params: { id: string } }>('/api/quests/:id/claim', async (req) => {
+  const me = await requireActor(req);
+  return db.tx(async (q) => {
+    const st = await questState(q, me.id);
+    const qu = st.quests.find((x) => x.id === req.params.id);
+    if (!qu) throw bad('No such quest.');
+    if (!qu.done) throw bad('Not done yet.');
+    if (qu.claimed) throw bad('Already claimed today.');
+    await q.query('insert into quest_claims (player_id, day, quest) values ($1,$2,$3)', [me.id, st.day, qu.id]);
+    const player = await credit(q, me.id, 0, qu.reward, 'quest', null);
+    return { ok: true, player, reward: qu.reward };
   });
 });
 

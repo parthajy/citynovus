@@ -3,8 +3,8 @@
 import type { Polygon, Position } from 'geojson';
 import { circleRing, ringAreaM2, ringsOverlap } from './geo';
 
-export type Kind = 'building' | 'pond' | 'park' | 'playground' | 'flyover' | 'road' | 'farm' | 'tree' | 'landmark' | 'furniture' | 'wall' | 'railway';
-export const KIND_IDS: Kind[] = ['building', 'farm', 'tree', 'landmark', 'furniture', 'park', 'playground', 'pond', 'flyover', 'road', 'wall', 'railway'];
+export type Kind = 'building' | 'pond' | 'park' | 'playground' | 'flyover' | 'road' | 'farm' | 'tree' | 'landmark' | 'furniture' | 'wall' | 'railway' | 'civic';
+export const KIND_IDS: Kind[] = ['building', 'farm', 'tree', 'landmark', 'furniture', 'park', 'playground', 'pond', 'flyover', 'road', 'wall', 'railway', 'civic'];
 
 export interface KindRule {
   label: string;
@@ -33,10 +33,16 @@ export const KINDS: Record<Kind, KindRule> = {
   furniture: { label: 'Street furniture', emoji: '💡', shape: 'point', tracePoints: 3, editPoints: 2, buyBase: 10, radius: 1.2, minM2: 0.5, maxM2: 50, hint: 'Tap where it goes' },
   wall: { label: 'Wall / fence', emoji: '🧱', shape: 'line', tracePoints: 10, editPoints: 5, buyBase: 30, width: 0.5, minM2: 1, maxM2: 20_000, hint: 'Tap along the wall' },
   railway: { label: 'Railway', emoji: '🚆', shape: 'line', tracePoints: 15, editPoints: 5, buyBase: 200, width: 4, minM2: 10, maxM2: 500_000, hint: 'Tap along the track' },
+  civic: { label: 'Civic issue', emoji: '🚧', shape: 'point', tracePoints: 5, editPoints: 2, buyBase: 0, radius: 2, minM2: 1, maxM2: 50, hint: 'Tap where the problem is' },
 };
+export const CIVIC = [
+  { id: 'garbage', label: 'Garbage / kachra' }, { id: 'pothole', label: 'Pothole' }, { id: 'waterlogging', label: 'Waterlogging' },
+  { id: 'drain', label: 'Open drain' }, { id: 'streetlight', label: 'Broken streetlight' }, { id: 'dumping', label: 'Illegal dumping' }, { id: 'encroachment', label: 'Footpath encroachment' },
+];
+export const RESOLVE_NEEDED = 3;
 /** One-word names for tight spaces and short messages. */
-export const SHORT: Record<Kind, string> = { building: 'building', farm: 'farm', tree: 'tree', park: 'park', playground: 'playground', pond: 'pond', flyover: 'flyover', road: 'road', landmark: 'landmark', furniture: 'furniture', wall: 'wall', railway: 'railway' };
-export const SHORT_LABEL: Record<Kind, string> = { building: 'Building', farm: 'Farm', tree: 'Tree', park: 'Park', playground: 'Playground', pond: 'Pond', flyover: 'Flyover', road: 'Road', landmark: 'Landmark', furniture: 'Furniture', wall: 'Wall', railway: 'Railway' };
+export const SHORT: Record<Kind, string> = { building: 'building', farm: 'farm', tree: 'tree', park: 'park', playground: 'playground', pond: 'pond', flyover: 'flyover', road: 'road', landmark: 'landmark', furniture: 'furniture', wall: 'wall', railway: 'railway', civic: 'report' };
+export const SHORT_LABEL: Record<Kind, string> = { building: 'Building', farm: 'Farm', tree: 'Tree', park: 'Park', playground: 'Playground', pond: 'Pond', flyover: 'Flyover', road: 'Road', landmark: 'Landmark', furniture: 'Furniture', wall: 'Wall', railway: 'Railway', civic: 'Civic' };
 export const SHORT_HINT: Record<'polygon' | 'line' | 'point', string> = { polygon: 'Tap the corners', line: 'Tap along it', point: 'Tap once' };
 export const LANDMARKS = [
   { id: 'temple', label: 'Temple' }, { id: 'mosque', label: 'Mosque' }, { id: 'church', label: 'Church' },
@@ -67,6 +73,7 @@ export const BLOCKED_BY: Record<Kind, Kind[]> = {
   furniture: ['building', 'pond', 'landmark', 'furniture', 'tree'],
   wall: ['building', 'pond', 'wall', 'landmark'],
   railway: ['building', 'pond', 'farm', 'railway', 'landmark', 'tree'],
+  civic: [], // a report can be anywhere: that is the point
 };
 /** Strip width in metres for a line kind. */
 export function lineWidth(kind: Kind, lanes?: number): number {
@@ -87,14 +94,30 @@ export const CROPS: Record<string, Crop> = {
 };
 export const CROP_IDS = Object.keys(CROPS);
 
-export const POINTS = { confirm: 3, confirmedBonus: 5, harvest: 5, buy: 5 };
+export const CURRENCY = 'Novus Coins';
+export const CURRENCY_SHORT = 'NC';
+export const POINTS = { confirm: 3, confirmedBonus: 5, harvest: 5, buy: 5, resolve: 3, resolvedBonus: 10 };
+/** Every sale, forever: the owner, the original builder, and the public City Treasury. */
+export const SALE_SPLIT = { owner: 0.8, builder: 0.1, treasury: 0.1 };
+export const OFFER_MIN = 10;
+export const OFFER_DAYS = 7;
+export const ABANDON_DAYS = 30;
+export const SHIELD_COST = 50;
+export const SHIELD_DAYS = 30;
+export const FLOOR_FEE_ABOVE = 6;
+export const FLOOR_FEE = 20;
+export const WITHER_DAYS = 7;
+export const STREAK_BONUS = 5;
+export const STREAK_CAP = 5;
+export const NOTES_MIN_POINTS = 1000;
+export const BOARD_MIN_POINTS = 5000;
+export const NOTE_MAX = 240;
 export const STARTING_COINS = 200;
 export const HOARDING_COST = 50;
 export const HOARDING_DAYS = 7;
 export const HOARDING_MAX = 40;
 export const FLAG_THRESHOLD = 5;
 export const DEFAULT_FLAG_MIN_POINTS = 1000;
-export const SELLER_SHARE = 0.8;
 export const RATE_LIMIT_PER_MIN = 40;
 export const flagWeight = (points: number) => Math.min(1, 0.2 + points / 500);
 
@@ -106,10 +129,14 @@ export interface Props {
   planted_at?: string;
   hoarding?: string;
   hoarding_until?: string;
-  subtype?: string; // landmark or furniture type
+  subtype?: string; // landmark, furniture or civic type
   sign?: string; // shopfront signage, free for the owner
   photos?: string[]; // photo-verified confirmations
+  resolved_by?: string[]; // civic: who marked it fixed
+  resolved_at?: string; // civic: closed
+  shield_until?: string; // protected from the abandonment rule
 }
+export type SaleStatus = 'none' | 'price' | 'offers';
 
 export interface Plot {
   id: string; // "way/123" for OSM features, "tw/<uuid>" for player-made ones
@@ -134,6 +161,10 @@ export interface Plot {
   hidden: boolean;
   /** Built by a guest: only they see it until they log in; expires otherwise. */
   provisional?: boolean;
+  sale_status?: SaleStatus;
+  sale_price?: number | null;
+  /** Server-computed: the owner has not been seen for ABANDON_DAYS and the plot is unshielded. */
+  abandoned?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -178,12 +209,24 @@ export function canUndo(p: Plot, me: Player, now = Date.now()): boolean {
 
 // ---------- pricing and growth ----------
 
-export function buyPrice(p: Plot): number {
+/** Land value: kind, size, how often it was confirmed, and how built-up the neighbourhood is (demand 1..2). */
+export function buyPrice(p: Plot, demand = 1): number {
   const base = KINDS[p.kind].buyBase;
   const size = p.kind === 'building' ? 1 + (p.floors - 1) * 0.25 : 1;
   const cred = 1 + Math.min(p.confirmations, 10) * 0.2;
-  const price = Math.round(base * size * cred);
+  const price = Math.round(base * size * cred * Math.max(1, Math.min(2, demand)));
   return p.hidden ? Math.max(5, Math.round(price / 10)) : price;
+}
+/** Demand from how many plots are built in the neighbourhood: 1 at nothing, 2 at a hundred. */
+export const demandFor = (builtInNeighbourhood: number) => 1 + Math.min(1, builtInNeighbourhood / 100);
+export const isShielded = (p: Plot, now = Date.now()) => !!p.props.shield_until && Date.parse(p.props.shield_until) > now;
+/** What a stranger can do with this plot right now. */
+export function purchasePath(p: Plot, demand = 1): { mode: 'buy' | 'offer' | 'none'; price: number; why: string } {
+  if (p.hidden) return { mode: 'buy', price: buyPrice(p, demand), why: 'Under review: anyone can take it over and fix it.' };
+  if (p.abandoned && !isShielded(p)) return { mode: 'buy', price: p.sale_price ?? buyPrice(p, demand), why: `The owner has been away ${ABANDON_DAYS}+ days.` };
+  if (p.sale_status === 'price' && p.sale_price) return { mode: 'buy', price: p.sale_price, why: 'For sale at the owner\'s price.' };
+  if (p.sale_status === 'offers') return { mode: 'offer', price: buyPrice(p, demand), why: 'The owner is open to offers.' };
+  return { mode: 'none', price: buyPrice(p, demand), why: 'Not for sale. You can still make an offer; the owner decides.' };
 }
 
 /** 0 = just planted, 1 = ready to harvest. */
@@ -281,8 +324,75 @@ export function applyEdit(existing: Plot | null, id: string, ctx: EditContext, c
     created_at: existing?.created_at ?? now,
     updated_at: now,
   };
+  // Going tall costs: every floor above the free limit is paid for once.
+  let fee = 0;
+  if (kind === 'building') {
+    const paidFrom = Math.max(FLOOR_FEE_ABOVE, existing?.floors ?? 0);
+    if (floors > paidFrom) fee = (floors - paidFrom) * FLOOR_FEE;
+    if (fee > me.coins) fail(`Floors above ${FLOOR_FEE_ABOVE} cost ${FLOOR_FEE} ${CURRENCY_SHORT} each. You need ${fee} and have ${me.coins}.`);
+  }
+  plot.sale_status = existing?.sale_status ?? 'none';
+  plot.sale_price = existing?.sale_price ?? null;
   const gained = isNew ? (id.startsWith('tw/') ? KINDS[kind].tracePoints : KINDS[kind].editPoints) : Math.max(2, Math.round(KINDS[kind].editPoints / 2));
-  return { plot, points: gained, coins: gained };
+  return { plot, points: gained, coins: gained - fee };
+}
+
+// ---------- market ----------
+
+export function applySaleTerms(p: Plot, me: Player, status: SaleStatus, price: number | null): Outcome {
+  if (p.owner_id !== me.id) fail('Only the owner sets the terms.');
+  if (p.kind === 'civic') fail('Reports are not for sale.');
+  if (status === 'price' && (!price || price < OFFER_MIN || price > 1_000_000)) fail(`Set a price of at least ${OFFER_MIN} ${CURRENCY_SHORT}.`);
+  return { plot: { ...p, sale_status: status, sale_price: status === 'price' ? Math.round(price!) : null }, points: 0, coins: 0 };
+}
+
+/** An offer holds the buyer's coins until the owner decides or it expires. */
+export function checkOffer(p: Plot, me: Player, amount: number): void {
+  if (!me.name) fail('Pick a name first.');
+  if (p.owner_id === me.id) fail('It is already yours.');
+  if (p.provisional) fail("This is a guest's unsaved work.");
+  if (p.kind === 'civic') fail('Reports are not for sale.');
+  if (!Number.isFinite(amount) || amount < OFFER_MIN) fail(`Offer at least ${OFFER_MIN} ${CURRENCY_SHORT}.`);
+  if (amount > me.coins) fail(`You have ${me.coins} ${CURRENCY_SHORT}.`);
+}
+
+export interface Settlement { plot: Plot; ownerId: string | null; ownerCoins: number; builderId: string | null; builderCoins: number; treasury: number }
+/** Move a plot to a buyer at a price and work out who is paid what. */
+export function settleSale(p: Plot, buyer: Player, price: number, now: string): Settlement {
+  const builderPaid = p.built_by_id && p.built_by_id !== p.owner_id && p.built_by_id !== buyer.id ? Math.round(price * SALE_SPLIT.builder) : 0;
+  const treasury = Math.round(price * SALE_SPLIT.treasury);
+  const ownerCoins = p.owner_id && p.owner_id !== buyer.id ? price - builderPaid - treasury : 0;
+  const plot: Plot = { ...p, owner_id: buyer.id, owner_name: buyer.name, confirmations: 0, flag_score: 0, hidden: false, sale_status: 'none', sale_price: null, abandoned: false, props: { ...p.props, shield_until: undefined }, updated_at: now };
+  return { plot, ownerId: p.owner_id, ownerCoins, builderId: builderPaid ? p.built_by_id : null, builderCoins: builderPaid, treasury: treasury + (p.owner_id === buyer.id ? 0 : 0) };
+}
+
+export function applyShield(p: Plot, me: Player, now: string): Outcome {
+  if (p.owner_id !== me.id) fail('Only the owner can shield it.');
+  if (me.coins < SHIELD_COST) fail(`A shield costs ${SHIELD_COST} ${CURRENCY_SHORT}. You have ${me.coins}.`);
+  const from = isShielded(p) ? Date.parse(p.props.shield_until!) : Date.parse(now);
+  return { plot: { ...p, props: { ...p.props, shield_until: new Date(from + SHIELD_DAYS * 86400_000).toISOString() }, updated_at: now }, points: 0, coins: -SHIELD_COST };
+}
+
+// ---------- civic ----------
+
+export function applyResolve(p: Plot, me: Player, now: string): Outcome {
+  if (p.kind !== 'civic') fail('Only reports get resolved.');
+  if (p.owner_id === me.id) fail('Someone else has to confirm it is fixed.');
+  if (p.props.resolved_at) fail('Already resolved.');
+  const by = p.props.resolved_by ?? [];
+  if (by.includes(me.id)) fail('You already marked this fixed.');
+  const next = [...by, me.id];
+  const done = next.length >= RESOLVE_NEEDED;
+  return { plot: { ...p, props: { ...p.props, resolved_by: next, ...(done ? { resolved_at: now } : {}) }, updated_at: now }, points: POINTS.resolve, coins: POINTS.resolve };
+}
+
+export function checkNote(text: string, me: Player, minPoints: number): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  if (me.points < minPoints) fail(`Posting opens at ${minPoints} points. You have ${me.points}.`);
+  if (t.length < 2) fail('Say something.');
+  if (t.length > NOTE_MAX) fail(`Keep it under ${NOTE_MAX} characters.`);
+  checkText(t, 'A note');
+  return t;
 }
 
 /** A confirmation with a photo of the real thing counts triple and keeps the photo on the plot. */
@@ -302,15 +412,19 @@ export function applyFlag(p: Plot, me: Player, already: boolean, minPoints: numb
   return { plot: { ...p, flag_score: score, hidden: score >= FLAG_THRESHOLD }, points: 0, coins: 0 };
 }
 
-export function applyBuy(p: Plot, me: Player, now: string): Outcome {
+/** Instant purchase is only possible on the owner's terms, on abandonment, or on a plot under review. */
+export function applyBuy(p: Plot, me: Player, now: string, demand = 1): Outcome & { settlement: Settlement } {
   if (!me.name) fail('Pick a name first.');
   if (p.provisional) fail('This is a guest\'s unsaved work and cannot be bought yet.');
   if (p.owner_id === me.id) fail('You already own this.');
-  const price = buyPrice(p);
-  if (me.coins < price) fail(`You need ${price} coins and have ${me.coins}. Earn more by building and confirming.`);
-  const seller = p.owner_id ? { id: p.owner_id, coins: Math.round(price * SELLER_SHARE) } : undefined;
-  const plot: Plot = { ...p, owner_id: me.id, owner_name: me.name, confirmations: 0, flag_score: 0, hidden: false, updated_at: now };
-  return { plot, points: POINTS.buy, coins: -price, seller };
+  if (p.kind === 'civic') fail('Reports are not for sale.');
+  const path = purchasePath(p, demand);
+  if (path.mode !== 'buy') fail(path.mode === 'offer' ? 'The owner takes offers on this one. Make an offer.' : 'Not for sale. Make an offer and the owner decides.');
+  const price = path.price;
+  if (me.coins < price) fail(`You need ${price} ${CURRENCY_SHORT} and have ${me.coins}. Earn more by building and confirming.`);
+  const settlement = settleSale(p, me, price, now);
+  const seller = settlement.ownerId ? { id: settlement.ownerId, coins: settlement.ownerCoins } : undefined;
+  return { plot: settlement.plot, points: POINTS.buy, coins: -price, seller, settlement };
 }
 
 export function applyPlant(p: Plot, crop: string, me: Player, now: string): Outcome {
@@ -330,6 +444,8 @@ export function applyHarvest(p: Plot, me: Player, now: string): Outcome {
   const stage = cropStage(p.props, Date.parse(now));
   if (stage < 1) fail(`${c.label} is ${Math.round(stage * 100)}% grown. Come back later.`);
   const props = { ...p.props }; delete props.crop; delete props.planted_at;
+  const ripeAt = Date.parse(p.props.planted_at!) + c.hours * 3600_000;
+  if (Date.parse(now) > ripeAt + WITHER_DAYS * 86400_000) return { plot: { ...p, props, updated_at: now }, points: 0, coins: 0, withered: true } as Outcome & { withered: boolean };
   return { plot: { ...p, props, updated_at: now }, points: POINTS.harvest, coins: c.yield };
 }
 
@@ -354,12 +470,13 @@ export function newPoint(id: string, kind: Kind, center: Position, neighbourhood
   if (KINDS[kind].shape !== 'point') fail('Not a one-tap kind.');
   if (kind === 'landmark' && !LANDMARKS.some((x) => x.id === subtype)) fail('Pick a landmark type.');
   if (kind === 'furniture' && !FURNITURE.some((x) => x.id === subtype)) fail('Pick what it is.');
+  if (kind === 'civic' && !CIVIC.some((x) => x.id === subtype)) fail('Pick the kind of problem.');
   const ring = pointRing(kind, center);
   const plot: Plot = {
     id, kind, neighbourhood, geometry: { type: 'Polygon', coordinates: [ring] },
     floors: 1, colour: null, style: null, roof: null, name: null, use: null, photo_url: null, props: subtype ? { subtype } : {},
     built_by_id: me.id, built_by_name: me.name, owner_id: me.id, owner_name: me.name, last_edit_by_name: me.name,
-    confirmations: 0, flag_score: 0, hidden: false, created_at: now, updated_at: now,
+    confirmations: 0, flag_score: 0, hidden: false, sale_status: 'none', sale_price: null, created_at: now, updated_at: now,
   };
   return { plot, points: KINDS[kind].tracePoints, coins: KINDS[kind].tracePoints };
 }

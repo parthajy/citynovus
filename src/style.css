@@ -114,7 +114,7 @@ label input, label select { margin-top: 4px; font-weight: 400; }
 
 /* Sheets and panels */
 .sheet { position: fixed; z-index: 25; border-radius: var(--radius-lg); padding: 16px 18px 18px; overflow: auto; }
-#panel, #profile, #weather-panel, #earn, #activity, #wishlist { top: 68px; right: 16px; width: var(--panel-w); max-height: calc(100vh - 100px); }
+#panel, #profile, #weather-panel, #earn, #activity, #wishlist, #inbox, #wallet, #board-sheet { top: 68px; right: 16px; width: var(--panel-w); max-height: calc(100vh - 100px); }
 #board { top: 68px; left: 16px; width: var(--panel-w); max-height: calc(100vh - 100px); }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
 .panel-head h2 { margin: 0; font-size: 20px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
@@ -131,6 +131,25 @@ label input, label select { margin-top: 4px; font-weight: 400; }
 .why.flash { animation: flash .6s ease-out; }
 @keyframes flash { from { background: var(--warn-container); } to { background: transparent; } }
 ul.earn { list-style: none; padding: 0; margin: 8px 0; }
+#btn-inbox { position: relative; }
+.badge-dot { position: absolute; top: 4px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e07a5f; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-family: Roboto, system-ui, sans-serif; }
+.seg { display: flex; border: 1px solid var(--outline); border-radius: 20px; overflow: hidden; }
+.seg button { flex: 1; padding: 8px 6px; font-size: 12.5px; border-radius: 0; }
+.seg button.on { background: var(--primary-container); color: var(--on-primary-container); font-weight: 500; }
+section.market .row { grid-template-columns: 1fr auto; align-items: center; }
+section.notes { margin-top: 12px; }
+.note { padding: 6px 0; border-top: 1px solid var(--outline-soft); font-size: 13px; }
+ol.feed li.offer { display: flex; align-items: center; gap: 8px; }
+ol.feed li.unread { background: var(--surface-2); border-radius: 8px; padding-left: 8px; }
+.sub-h { margin: 14px 0 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.quest { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--outline-soft); }
+.quest .bar { margin: 4px 0; }
+.quest.done b { color: var(--primary); }
+.quest .ms.done { color: var(--primary); }
+ol.ledger li { display: flex; align-items: center; gap: 8px; cursor: default; }
+.pos { color: var(--primary); } .neg { color: var(--error); }
+.civic-n { color: #b4532f; font-weight: 500; }
+button.chip { cursor: pointer; }
 ul.earn li { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid var(--outline-soft); }
 ul.earn .ms { color: var(--primary); font-size: 24px; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -268,7 +287,7 @@ button.icon:not(.btn):hover { background: color-mix(in srgb, currentColor 10%, t
   .fab { position: static; height: 44px; padding: 0 16px 0 12px; border-radius: 22px; box-shadow: none; background: var(--primary); color: var(--on-primary); }
   .fab span:not(.ms) { display: none; }
   #kind-menu { left: 8px; right: 8px; width: auto; bottom: 72px; }
-  #panel, #board, #profile, #weather-panel, #earn, #activity, #wishlist { top: auto; bottom: 64px; left: 0; right: 0; width: auto; max-height: 68vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 22px 14px 16px; }
+  #panel, #board, #profile, #weather-panel, #earn, #activity, #wishlist, #inbox, #wallet, #board-sheet { top: auto; bottom: 64px; left: 0; right: 0; width: auto; max-height: 68vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 22px 14px 16px; }
   .panel-head h2 { font-size: 19px; }
   .sheet::before { content: ''; position: absolute; top: 8px; left: 50%; width: 32px; height: 4px; border-radius: 2px; background: var(--outline); transform: translateX(-50%); }
   #trace-bar { top: 58px; padding: 4px 6px 4px 14px; gap: 2px; max-width: calc(100vw - 16px); white-space: nowrap; }

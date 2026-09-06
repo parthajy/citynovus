@@ -3,8 +3,8 @@ import type { EditInput, Plot, Props, Store } from './types';
 import type { WorldMap } from './map';
 import type { ShapeEditor } from './editor';
 import {
-  COMMERCIAL_USES, CROPS, CROP_IDS, FLAG_REASONS, FLAG_THRESHOLD, FURNITURE, HOARDINGS_ENABLED, HOARDING_COST, HOARDING_DAYS, HOARDING_MAX, KINDS, KIND_ICONS, LANDMARKS, LANES, MAX_FLOORS, PALETTE, ROOFS, SIGN_MAX, STYLES, TREES, USES,
-  buyPrice, canTerrace, checkPlacement, checkSize, cropStage, hoardingActive, lineWidth, type Kind,
+  CIVIC, COMMERCIAL_USES, CROPS, CROP_IDS, CURRENCY_SHORT, FLAG_REASONS, FLAG_THRESHOLD, FLOOR_FEE, FLOOR_FEE_ABOVE, FURNITURE, HOARDINGS_ENABLED, HOARDING_COST, HOARDING_DAYS, HOARDING_MAX, KINDS, KIND_ICONS, LANDMARKS, LANES, MAX_FLOORS, NOTES_MIN_POINTS, OFFER_MIN, PALETTE, RESOLVE_NEEDED, ROOFS, SHIELD_COST, SHIELD_DAYS, SIGN_MAX, STYLES, TREES, USES,
+  buyPrice, canTerrace, checkPlacement, checkSize, cropStage, demandFor, hoardingActive, isShielded, lineWidth, purchasePath, type Kind, type SaleStatus,
 } from './config';
 import { RuleError, SHORT_LABEL } from '../shared/rules';
 const mobile = () => matchMedia('(max-width: 760px)').matches;
@@ -24,6 +24,7 @@ interface Deps {
   needsLogin: () => boolean;
   onLogin: () => void;
   onEarn: () => void;
+  onInbox: () => void;
   /** Called after a fresh claim or trace with the plot id, so the app can offer Undo. */
   onFresh: (id: string) => void;
 }
@@ -107,8 +108,14 @@ export class Panel {
     };
     this.draft = draft;
     const noun = SHORT_LABEL[kind].toLowerCase();
-    const title = draft.name || draft.props.sign || p.osm_name || (b ? `Unnamed ${noun}` : this.open_.isNew ? `New ${noun}` : `Grey ${noun}`);
+    const subLabel = kind === 'civic' ? CIVIC.find((c) => c.id === draft.props.subtype)?.label : kind === 'landmark' ? LANDMARKS.find((c) => c.id === draft.props.subtype)?.label : kind === 'furniture' ? FURNITURE.find((c) => c.id === draft.props.subtype)?.label : undefined;
+    const title = draft.name || draft.props.sign || p.osm_name || subLabel || (b ? `Unnamed ${noun}` : this.open_.isNew ? `New ${noun}` : `Grey ${noun}`);
     const neighbourhood = b?.neighbourhood ?? this.open_.neighbourhood ?? p.neighbourhood;
+    const demand = demandFor(this.d.world.builtIn(neighbourhood));
+    const path = b ? purchasePath(b, demand) : { mode: 'none' as const, price: 0, why: '' };
+    const price = path.price;
+    const short = path.mode === 'buy' ? Math.max(0, price - me.coins) : 0;
+    const value = b ? buyPrice(b, demand) : 0;
     const status = this.open_.isNew ? (mobile() ? ` · +${K.tracePoints}` : ` · yours once published (+${K.tracePoints})`) : b ? '' : (mobile() ? ` · +${K.editPoints}` : ` · unclaimed (+${K.editPoints})`);
     const dis = canEdit ? '' : 'disabled';
 
@@ -140,12 +147,12 @@ export class Panel {
       <label>What is it<select name="use" ${dis}>${opts(USES, draft.use)}</select></label>`;
     const parkFields = `<label>Trees<select name="trees" ${dis}>${opts(TREES, draft.props.trees ?? (kind === 'playground' ? 'sparse' : 'normal'), false)}</select></label>`;
     const lineFields = `<label>Width<select name="lanes" ${dis}>${opts(LANES, String(draft.props.lanes ?? K.lanes ?? 2), false)}</select></label>`;
-    const subFields = kind === 'landmark' || kind === 'furniture'
-      ? `<label>What is it<select name="subtype" ${dis}>${opts(kind === 'landmark' ? LANDMARKS : FURNITURE, draft.props.subtype ?? (kind === 'landmark' ? 'temple' : 'streetlight'), false)}</select></label>` : '';
+    const subFields = kind === 'landmark' || kind === 'furniture' || kind === 'civic'
+      ? `<label>What is it<select name="subtype" ${dis}>${opts(kind === 'landmark' ? LANDMARKS : kind === 'civic' ? CIVIC : FURNITURE, draft.props.subtype ?? (kind === 'landmark' ? 'temple' : kind === 'civic' ? 'garbage' : 'streetlight'), false)}</select></label>` : '';
     const signField = kind === 'building' && draft.use && COMMERCIAL_USES.has(draft.use)
       ? `<label>Shop sign${mobile() ? '' : ' (street-level board, separate from the name)'}<input name="sign" maxlength="${SIGN_MAX}" placeholder="e.g. Bora Tea Stall" value="${esc(draft.props.sign ?? '')}" ${dis}></label>` : '';
     const fields = kind === 'building' ? buildingFields : kind === 'park' || kind === 'playground' ? parkFields : K.shape === 'line' && K.lanes ? lineFields : subFields;
-    const namePlaceholder = kind === 'building' ? 'Shop, school, landmark — never a private person' : kind === 'tree' ? 'Krishnachura, mango, tamul…' : `Name of the ${noun}`;
+    const namePlaceholder = kind === 'building' ? 'Shop, school, landmark — never a private person' : kind === 'tree' ? 'Krishnachura, mango, tamul…' : kind === 'civic' ? 'What is wrong here, in a few words' : `Name of the ${noun}`;
 
     // Farming: a farm, or a flat roof.
     let farm = '';
@@ -170,6 +177,31 @@ export class Panel {
       farm = `<p class="hint">Choose a flat roof to farm on the terrace.</p>`;
     }
 
+    // Civic: who has confirmed it is fixed
+    let civic = '';
+    if (b && kind === 'civic') {
+      const done = b.props.resolved_by?.length ?? 0;
+      civic = b.props.resolved_at
+        ? `<div class="banner"><span class="ms">task_alt</span> Fixed. Confirmed by ${done} people. It leaves the map in two days.</div>`
+        : `<section class="farm"><div class="farm-head"><span><span class="ms">construction</span> Open</span><span>${done} of ${RESOLVE_NEEDED} say it is fixed</span></div>
+           ${!mine ? `<button class="btn tonal" data-act="resolve" ${b.props.resolved_by?.includes(me.id) ? 'aria-disabled="true" data-why="You already marked this fixed."' : ''}><span class="ms">task_alt</span>It is fixed now</button>` : '<div class="hint">Others confirm it is real (+3) or mark it fixed. You get +10 when three people say it is fixed.</div>'}</section>`;
+    }
+    // Market: the owner's terms, or the buyer's options
+    let market = '';
+    if (b && kind !== 'civic' && !b.provisional) {
+      if (mine) {
+        const st = b.sale_status ?? 'none';
+        market = `<section class="farm market"><div class="farm-head"><span><span class="ms">storefront</span> Sale terms</span><span>value ~${value} ${CURRENCY_SHORT}</span></div>
+          <div class="seg">${(['none', 'price', 'offers'] as SaleStatus[]).map((x) => `<button class="${st === x ? 'on' : ''}" data-act="sale" data-status="${x}">${x === 'none' ? 'Not for sale' : x === 'price' ? 'Fixed price' : 'Open to offers'}</button>`).join('')}</div>
+          ${st === 'price' ? `<div class="row" style="margin-top:8px"><input name="sale_price" type="number" min="${OFFER_MIN}" value="${b.sale_price ?? value}"><button class="btn tonal" data-act="sale-price">Set</button></div>` : ''}
+          <div class="hint" style="margin-top:8px">You keep 80%, the original builder gets 10%, the City Treasury 10%. ${isShielded(b) ? `Shielded until ${new Date(b.props.shield_until!).toLocaleDateString()}.` : `If you are away 30 days it can be bought without asking; a shield stops that for ${SHIELD_DAYS} days.`}</div>
+          ${!isShielded(b) ? `<button class="btn text" data-act="shield" ${me.coins < SHIELD_COST ? `aria-disabled="true" data-why="A shield costs ${SHIELD_COST} ${CURRENCY_SHORT}. You have ${me.coins}."` : ''}><span class="ms">shield</span>Shield · ${SHIELD_COST} ${CURRENCY_SHORT}</button>` : ''}</section>`;
+      } else {
+        market = `<section class="farm market"><div class="farm-head"><span><span class="ms">storefront</span> ${path.mode === 'buy' ? `Buy · ${price} ${CURRENCY_SHORT}` : 'Make an offer'}</span><span>value ~${value}</span></div>
+          <div class="hint">${esc(path.why)}</div>
+          ${path.mode !== 'buy' ? `<div class="row" style="margin-top:8px"><input name="offer_amount" type="number" min="${OFFER_MIN}" max="${me.coins}" placeholder="${CURRENCY_SHORT}" value="${Math.min(me.coins, value)}"><button class="btn tonal" data-act="offer" ${me.coins < OFFER_MIN ? `aria-disabled="true" data-why="You need at least ${OFFER_MIN} ${CURRENCY_SHORT} to offer."` : ''}><span class="ms">local_offer</span>Offer</button></div><div class="hint">Your coins are held until the owner answers, up to 7 days.</div>` : ''}</section>`;
+      }
+    }
     let hoarding = '';
     if (HOARDINGS_ENABLED && b && mine && kind === 'building' && b.floors >= 2) {
       const active = hoardingActive(b.props);
@@ -181,12 +213,11 @@ export class Panel {
       </section>`;
     }
 
-    const price = b ? buyPrice(b) : 0;
     const flagMin = this.d.flagMinPoints();
-    const short = Math.max(0, price - me.coins);
     const needsLogin = this.d.needsLogin();
     const why: string[] = [];
-    if (b && !mine && short > 0) why.push(`You have ${me.coins} coins and need ${short} more. <a href="#" data-act="earn">How to earn coins</a>`);
+    if (b && !mine && short > 0) why.push(`You have ${me.coins} ${CURRENCY_SHORT} and need ${short} more. <a href="#" data-act="earn">How to earn Novus Coins</a>`);
+    if (b && mine && kind === 'building' && draft.floors > Math.max(FLOOR_FEE_ABOVE, b.floors)) why.push(`Floors above ${FLOOR_FEE_ABOVE} cost ${FLOOR_FEE} ${CURRENCY_SHORT} each: ${(draft.floors - Math.max(FLOOR_FEE_ABOVE, b.floors)) * FLOOR_FEE} ${CURRENCY_SHORT} on publish.`);
     if (b && !mine && me.points < flagMin) why.push(`Flagging opens at ${flagMin} points. You have ${me.points}.`);
     if (b && mine && canTerrace({ kind, roof: draft.roof }) && !b.props.crop && me.coins < cheapest) why.push(`Seeds cost ${cheapest}+ coins. You have ${me.coins}. <a href="#" data-act="earn">How to earn coins</a>`);
     if (HOARDINGS_ENABLED && b && mine && kind === 'building' && b.floors >= 2 && !hoardingActive(b.props) && me.coins < HOARDING_COST) why.push(`A hoarding costs ${HOARDING_COST} coins. You have ${me.coins}. <a href="#" data-act="earn">How to earn coins</a>`);
@@ -200,7 +231,7 @@ export class Panel {
       </div>
       ${b?.hidden ? `<div class="banner warn">Under community review (${b.flag_score.toFixed(1)}/${FLAG_THRESHOLD} flags). Anyone can buy it for ${price} coins and fix it.</div>` : ''}
       ${b ? `<div class="meta">${mine ? 'Yours' : `Owned by <b>${esc(b.owner_name || 'someone')}</b>`}${b.built_by_name && b.built_by_name !== b.owner_name ? `, built by ${esc(b.built_by_name)}` : ''} · confirmed ${b.confirmations}×${!mine ? ` · <b>${price} coins</b> to buy` : ''}</div>` : ''}
-      ${!canEdit ? `<div class="banner">Buy it to change it. The owner gets most of the coins.</div>` : ''}
+      ${!canEdit && kind !== 'civic' ? `<div class="banner">${path.mode === 'buy' ? 'Buy it to change it.' : 'Owned. Make an offer, and the owner decides.'} The owner and the builder get paid.</div>` : ''}
       ${needsLogin && canEdit ? `<div class="banner">You need an account to build. <a href="#" data-act="login">Log in or create one</a>. It takes a minute and you keep everything.</div>` : ''}
       ${!needsLogin && !me.name && canEdit ? `<div class="banner"><label>Your name goes on what you build<input name="player_name" maxlength="24" placeholder="your name"></label></div>` : ''}
       ${fields}
@@ -210,7 +241,7 @@ export class Panel {
       ${draft.photo_url ? `<img class="photo" src="${esc(draft.photo_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
       ${b?.props.photos?.length ? `<div class="photos">${b.props.photos.slice(-3).map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}<span class="hint">Photo-verified ${b.props.photos.length}×</span></div>` : ''}
       <div class="actions">
-        ${canEdit ? `<button class="btn filled main" data-act="publish"><span class="ms">publish</span>${mobile() ? 'Publish' : b ? 'Publish changes' : this.open_.isNew ? 'Publish' : 'Claim & publish'}</button>` : `<button class="btn filled main" data-act="buy" ${short > 0 ? `aria-disabled="true" data-why="You need ${short} more coins. Claim grey buildings, plant trees or confirm neighbours to earn them."` : ''}><span class="ms">shopping_bag</span>${short > 0 ? `Need ${short} more coins` : `Buy · ${price} coins`}</button>`}
+        ${canEdit ? `<button class="btn filled main" data-act="publish"><span class="ms">publish</span>${mobile() ? 'Publish' : b ? 'Publish changes' : this.open_.isNew ? 'Publish' : 'Claim & publish'}</button>` : path.mode === 'buy' ? `<button class="btn filled main" data-act="buy" ${short > 0 ? `aria-disabled="true" data-why="You need ${short} more ${CURRENCY_SHORT}. Claim grey buildings, plant trees or confirm neighbours to earn them."` : ''}><span class="ms">shopping_bag</span>${short > 0 ? `Need ${short} more ${CURRENCY_SHORT}` : `Buy · ${price} ${CURRENCY_SHORT}`}</button>` : ''}
         ${canEdit && kind !== 'tree' ? `<button class="btn tonal" data-act="shape" title="Drag the corners"><span class="ms">open_with</span>Reshape</button>` : ''}
         ${b && !mine ? `<button class="btn tonal" data-act="confirm" title="Yes, this is really here"><span class="ms">verified</span>Confirm</button>` : ''}
         ${b && !mine ? `<button class="btn tonal" data-act="confirm-photo" title="Confirm with a photo of the real thing: counts triple"><span class="ms">add_a_photo</span>Photo</button><input type="file" name="confirm_file" accept="image/*" capture="environment" hidden>` : ''}
@@ -218,7 +249,9 @@ export class Panel {
       </div>
       ${this.error ? `<div class="banner error"><span class="ms">error</span>${esc(this.error)}</div>` : ''}
       ${why.map((w) => `<div class="hint why">${w}</div>`).join('')}
-      ${farm}${hoarding}
+      ${civic}${market}${farm}${hoarding}
+      ${b ? `<section class="notes"><div class="farm-head"><span><span class="ms">chat_bubble</span> Notes</span><span class="sub" id="notes-count"></span></div><div class="notes-list hint">Loading…</div>
+        ${me.points >= NOTES_MIN_POINTS ? `<div class="row" style="margin-top:6px"><input name="note" maxlength="240" placeholder="Say something about this ${esc(noun)}"><button class="btn tonal" data-act="note"><span class="ms">send</span></button></div>` : `<div class="hint">Posting notes opens at ${NOTES_MIN_POINTS} points. You have ${me.points}.</div>`}</section>` : ''}
       <div class="flag-box" hidden>
         <select name="flag_reason">${FLAG_REASONS.map((r) => `<option value="${r.id}">${r.label}</option>`).join('')}</select>
         <button class="btn tonal danger" data-act="flag-send">Send flag</button>
@@ -227,10 +260,11 @@ export class Panel {
       <div class="history" hidden></div>
     `;
 
+    if (b) void this.loadNotes(id);
     this.el.onclick = (ev) => this.onClick(ev);
     this.el.oninput = (ev) => {
       const t = ev.target as HTMLInputElement;
-      if (t.matches('[name="crop"],[name="hoarding"],[name="flag_reason"],[name="player_name"]')) return;
+      if (t.matches('[name="crop"],[name="hoarding"],[name="flag_reason"],[name="player_name"],[name="sale_price"],[name="offer_amount"],[name="note"]')) return;
       this.onInput();
       // Some fields change which sections exist (shop sign, terrace farm), so redraw the form.
       if (t.name === 'use' || t.name === 'roof' || t.name === 'subtype') this.render();
@@ -346,6 +380,18 @@ export class Panel {
     return this.d.requireIdentity();
   }
 
+  private async loadNotes(id: string) {
+    const box = this.el.querySelector<HTMLElement>('.notes-list');
+    if (!box) return;
+    try {
+      const notes = await this.d.store.notes(id);
+      if (this.currentId !== id) return;
+      const count = this.el.querySelector('#notes-count'); if (count) count.textContent = notes.length ? String(notes.length) : '';
+      box.className = 'notes-list';
+      box.innerHTML = notes.length ? notes.slice(0, 8).map((n) => `<div class="note"><b>${esc(n.player_name || 'someone')}</b> <span class="sub">${new Date(n.created_at).toLocaleDateString()}</span><br>${esc(n.text)}</div>`).join('') : '<div class="hint">No notes yet.</div>';
+    } catch (e) { box.textContent = (e as Error).message; }
+  }
+
   private async act(fn: () => Promise<{ plot: Plot; gained: number }>, msg: (r: { plot: Plot; gained: number }) => string) {
     const r = await fn();
     this.error = null;
@@ -408,6 +454,34 @@ export class Panel {
       } else if (act === 'buy') {
         if (!(await this.identity())) return;
         await this.act(() => store.buy(id), (r) => `It is yours · ${esc(r.plot.owner_name || '')}`);
+      } else if (act === 'sale') {
+        const status = btn.dataset.status as SaleStatus;
+        const current = this.d.state.get(id);
+        const price = status === 'price' ? (current?.sale_price ?? Math.max(OFFER_MIN, buyPrice(current!, demandFor(this.d.world.builtIn(current!.neighbourhood))))) : null;
+        await this.act(() => store.saleTerms(id, status, price), () => status === 'none' ? 'Not for sale' : status === 'price' ? `For sale at ${price} ${CURRENCY_SHORT}` : 'Open to offers');
+      } else if (act === 'sale-price') {
+        const price = Number(this.el.querySelector<HTMLInputElement>('[name="sale_price"]')!.value);
+        await this.act(() => store.saleTerms(id, 'price', price), () => `For sale at ${price} ${CURRENCY_SHORT}`);
+      } else if (act === 'offer') {
+        if (!(await this.identity())) return;
+        const amount = Number(this.el.querySelector<HTMLInputElement>('[name="offer_amount"]')!.value);
+        await store.offer(id, amount);
+        this.d.onPlayer();
+        this.error = null;
+        this.d.toast(`Offered ${amount} ${CURRENCY_SHORT}. The owner has 7 days to answer; watch your inbox.`, 'ok');
+        this.render();
+      } else if (act === 'shield') {
+        await this.act(() => store.shield(id), () => `Shielded for ${SHIELD_DAYS} days`);
+      } else if (act === 'resolve') {
+        if (!(await this.identity())) return;
+        await this.act(() => store.resolve(id), (r) => (r.plot.props.resolved_at ? 'Marked fixed. Three people agree: it is closed.' : `Marked fixed · +${r.gained}`));
+      } else if (act === 'note') {
+        if (!(await this.identity())) return;
+        const input = this.el.querySelector<HTMLInputElement>('[name="note"]')!;
+        await store.addNote(id, input.value);
+        input.value = '';
+        this.d.toast('Posted');
+        void this.loadNotes(id);
       } else if (act === 'plant') {
         const crop = this.el.querySelector<HTMLSelectElement>('[name="crop"]')!.value;
         await this.act(() => store.plant(id, crop), () => `${CROPS[crop].emoji} Planted. Come back in ${hours(CROPS[crop].hours)}.`);

@@ -1,6 +1,6 @@
 // Talks to the CityNovus API (server/). Cookie session for accounts, a device id for guests.
 import type { Position } from 'geojson';
-import type { Activity, EditContext, EditInput, Footprint, HistoryItem, Kind, Player, Plot, Result, Session, Store } from './types';
+import type { Activity, EditContext, EditInput, Footprint, HistoryItem, Kind, LedgerItem, Note, Notification, Offer, Player, Plot, Quest, Result, SaleStatus, Session, Store } from './types';
 import { API_URL } from './config';
 import { uuid } from './geo';
 
@@ -73,6 +73,22 @@ export class ServerStore implements Store {
   async wishlist() { return this.call<{ top: { key: string; city: string; votes: number }[]; mine: string[] }>('GET', '/api/wishlist'); }
   async wish(city: string, note?: string) { await this.call('POST', '/api/wishlist', { city, note }); }
   async unwish(key: string) { await this.call('DELETE', `/api/wishlist/${encodeURIComponent(key)}`); }
+  async saleTerms(id: string, status: SaleStatus, price: number | null) { return this.take(await this.call('POST', `/api/plots/${encodeURIComponent(id)}/sale`, { status, price })); }
+  async offer(id: string, amount: number) { const r = await this.call<{ player: Player }>('POST', `/api/plots/${encodeURIComponent(id)}/offer`, { amount }); this.me = r.player; return r.player; }
+  async offers() { return this.call<{ made: Offer[]; received: Offer[] }>('GET', '/api/offers'); }
+  async decideOffer(id: number, action: 'accept' | 'decline' | 'cancel') { const r = await this.call<{ player: Player }>('POST', `/api/offers/${id}/${action}`); if (r.player) this.me = r.player; return r.player; }
+  async shield(id: string) { return this.take(await this.call('POST', `/api/plots/${encodeURIComponent(id)}/shield`)); }
+  async resolve(id: string) { return this.take(await this.call('POST', `/api/plots/${encodeURIComponent(id)}/resolve`)); }
+  async notes(id: string) { return this.call<Note[]>('GET', `/api/plots/${encodeURIComponent(id)}/notes`); }
+  async addNote(id: string, text: string) { await this.call('POST', `/api/plots/${encodeURIComponent(id)}/notes`, { text }); }
+  async board(name: string) { return this.call<Note[]>('GET', `/api/boards/${encodeURIComponent(name)}`); }
+  async addBoardNote(name: string, text: string) { await this.call('POST', `/api/boards/${encodeURIComponent(name)}`, { text }); }
+  async inbox() { return this.call<{ items: Notification[]; unread: number }>('GET', '/api/inbox'); }
+  async markRead() { await this.call('POST', '/api/inbox/read'); }
+  async ledger() { return this.call<LedgerItem[]>('GET', '/api/me/ledger'); }
+  async quests() { return this.call<{ day: string; quests: Quest[] }>('GET', '/api/quests'); }
+  async claimQuest(id: string) { const r = await this.call<{ player: Player }>('POST', `/api/quests/${id}/claim`); this.me = r.player; return r.player; }
+  async treasury() { return (await this.call<{ balance: number }>('GET', '/api/treasury')).balance; }
   async googleStart() { return (await this.call<{ url: string }>('POST', '/api/auth/google/start', { device: deviceId() })).url; }
   async reset(token: string, password: string) { return (await this.call<{ message: string }>('POST', '/api/auth/reset', { token, password })).message; }
   async loadPlots() { return this.call<Plot[]>('GET', '/api/plots'); }

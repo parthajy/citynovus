@@ -130,3 +130,57 @@ create index if not exists wishlist_city_idx on wishlist (city_key);
 
 -- v0.6.1: OAuth state may be created before the guest row exists; no foreign key on tokens.
 alter table tokens drop constraint if exists tokens_player_id_fkey;
+
+-- v0.7: the economy. Sale terms, offers held in escrow, inbox, notes and boards, treasury, quests, streaks.
+alter table plots add column if not exists sale_status text not null default 'none';
+alter table plots add column if not exists sale_price integer;
+alter table players add column if not exists streak integer not null default 0;
+alter table players add column if not exists streak_day text;
+
+create table if not exists offers (
+  id         serial primary key,
+  plot_id    text not null,
+  buyer_id   text not null,
+  amount     integer not null,
+  status     text not null default 'pending',   -- pending | accepted | declined | cancelled | expired
+  created_at timestamptz not null default now(),
+  decided_at timestamptz
+);
+create index if not exists offers_plot_idx on offers (plot_id, status);
+create index if not exists offers_buyer_idx on offers (buyer_id, status);
+
+create table if not exists notifications (
+  id         serial primary key,
+  player_id  text not null,
+  type       text not null,
+  text       text not null,
+  plot_id    text,
+  offer_id   integer,
+  read       boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists notifications_player_idx on notifications (player_id, read, id);
+
+create table if not exists notes (
+  id          serial primary key,
+  plot_id     text,
+  board       text,
+  player_id   text not null,
+  player_name text,
+  text        text not null,
+  hidden      boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+create index if not exists notes_plot_idx on notes (plot_id, id);
+create index if not exists notes_board_idx on notes (board, id);
+
+create table if not exists treasury (id integer primary key, balance integer not null default 0);
+insert into treasury (id, balance) values (1, 0) on conflict (id) do nothing;
+
+create table if not exists quest_claims (
+  player_id  text not null,
+  day        text not null,
+  quest      text not null,
+  created_at timestamptz not null default now(),
+  primary key (player_id, day, quest)
+);

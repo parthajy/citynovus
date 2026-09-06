@@ -98,7 +98,26 @@ show a nudge to banpani.org, which carries the official alerts.
 ## The rules, in one place
 
 Everything below lives in `shared/rules.ts`, which both the browser and the server run, so a
-rule cannot differ between the two.
+rule cannot differ between the two. The currency is **Novus Coins (NC)**: earned by playing,
+spent on land, seeds, tall floors and shields, never bought, sold or transferred.
+
+**Market.** A plot is *not for sale* (default), *for sale at a fixed price* (instant buy), or
+*open to offers*. Offers hold the buyer's coins in escrow for up to 7 days; the owner accepts
+or declines from the inbox. An owner absent for 30 days makes their plots buyable without
+asking, unless shielded (50 NC for 30 days). Every sale, forever: owner 80%, original builder
+10%, City Treasury 10%. Plots under community review can be taken over for a tenth of value.
+Land value = kind × floors × confirmations × neighbourhood demand.
+
+**Civic reports.** One tap: garbage, pothole, waterlogging, open drain, broken streetlight,
+illegal dumping, footpath encroachment, with a photo. Others confirm it is real or mark it
+fixed; three "fixed" marks close it and pay the reporter. Open counts show on the
+neighbourhood leaderboard; `/api/admin/civic.csv` is the export for the municipality.
+
+**Notes and boards.** Plot notes open at 1000 points, neighbourhood boards at 5000. Same
+blocklist, flags and admin tools as everything else. No direct messages.
+
+**Daily.** A streak bonus on each day's first visit (5 to 25 NC) and four daily quests worth up
+to 45 NC, claimed from the wallet. The wallet shows the full ledger and the Treasury balance.
 
 | Action | Points | Coins | Notes |
 |---|---|---|---|
@@ -114,6 +133,12 @@ rule cannot differ between the two.
 | Harvest | +5 | +yield | tomato 4h → tea 2d → bamboo 3d, real time |
 | Put up a hoarding | 0 | −50 | off until launch traction (`VITE_HOARDINGS=true`); the future revenue model |
 | Flag | 0 | 0 | needs 1000 points; weight grows from 0.2 to 1 |
+| Floors above 6 | 0 | −20 each | paid once when you go up |
+| Shield a plot | 0 | −50 | 30 days safe from the abandonment rule |
+| Report a civic issue | +5 | +5 | +10 more when three people mark it fixed |
+| Mark a report fixed | +3 | +3 | |
+| Daily streak | 0 | +5 to +25 | first visit each day |
+| Daily quest | 0 | +10 to +15 | claim in the wallet |
 | Place a landmark | +15 | +15 | one tap |
 | Street furniture | +3 | +3 | one tap |
 | Wall or railway | +10 / +15 | same | traced as a line |

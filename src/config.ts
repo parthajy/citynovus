@@ -15,8 +15,10 @@ export const NIGHT_STYLE = import.meta.env.VITE_NIGHT_STYLE || 'https://tiles.op
 export const SATELLITE_TILES = import.meta.env.VITE_SATELLITE_TILES || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 export const SATELLITE_ATTRIBUTION = 'Imagery © Esri, Maxar, Earthstar Geographics';
 /** Material Symbols names for each kind. */
-export const KIND_ICONS: Record<string, string> = { building: 'home_work', farm: 'agriculture', tree: 'park', park: 'nature', playground: 'sports_soccer', pond: 'water', flyover: 'alt_route', road: 'add_road', landmark: 'temple_hindu', furniture: 'light', wall: 'fence', railway: 'train' };
-export const SUBTYPE_ICONS: Record<string, string> = { temple: 'temple_hindu', mosque: 'mosque', church: 'church', statue: 'emoji_people', gate: 'door_sliding', tank: 'water_drop', streetlight: 'light', busstop: 'directions_bus', bench: 'chair', dustbin: 'delete', teastall: 'emoji_food_beverage' };
+export const KIND_ICONS: Record<string, string> = { building: 'home_work', farm: 'agriculture', tree: 'park', park: 'nature', playground: 'sports_soccer', pond: 'water', flyover: 'alt_route', road: 'add_road', landmark: 'temple_hindu', furniture: 'light', wall: 'fence', railway: 'train', civic: 'report_problem' };
+export const SUBTYPE_ICONS: Record<string, string> = { temple: 'temple_hindu', mosque: 'mosque', church: 'church', statue: 'emoji_people', gate: 'door_sliding', tank: 'water_drop', streetlight: 'light', busstop: 'directions_bus', bench: 'chair', dustbin: 'delete', teastall: 'emoji_food_beverage',
+  garbage: 'delete_sweep', pothole: 'warning', waterlogging: 'water_damage', drain: 'water', streetlight_broken: 'light_off', dumping: 'recycling', encroachment: 'block' };
+export const CIVIC_SHORT: Record<string, string> = { garbage: 'Garbage', pothole: 'Pothole', waterlogging: 'Water', drain: 'Drain', streetlight: 'Light', dumping: 'Dumping', encroachment: 'Footpath' };
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 /** 'local' keeps everything in this browser, 'server' talks to the CityNovus API, 'auto' probes for one. */
 export const BACKEND = (import.meta.env.VITE_BACKEND as 'local' | 'server' | 'auto' | undefined) ?? 'auto';

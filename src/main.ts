@@ -1,7 +1,7 @@
 import './style.css';
 import type { FeatureCollection, Polygon } from 'geojson';
 import type { Plot, Props, Session, Store } from './types';
-import { BACKEND, BADGES, FURNITURE, KINDS, KIND_ICONS, KIND_IDS, LANDMARKS, PALETTE, ROOFS, SHORT_HINT, SHORT_LABEL, SUBTYPE_ICONS, checkPlacement, checkSize, lineWidth, type Kind } from './config';
+import { BACKEND, BADGES, BOARD_MIN_POINTS, CIVIC, CURRENCY, CURRENCY_SHORT, FURNITURE, KINDS, KIND_ICONS, KIND_IDS, LANDMARKS, PALETTE, ROOFS, SHORT_HINT, SHORT_LABEL, SUBTYPE_ICONS, checkPlacement, checkSize, lineWidth, type Kind } from './config';
 import { WeatherFX, describe, fetchWeather, isNight, severe, sunPosition, type Weather } from './weather';
 import { enableRipples, mountControls } from './controls';
 import { LoginScreen } from './login';
@@ -47,6 +47,7 @@ function toast(msg: string, kind: 'ok' | 'err' = 'ok', action?: { label: string;
   toastTimer = window.setTimeout(() => (el.hidden = true), action?.ms ?? (kind === 'err' ? 6500 : 3600));
 }
 
+function showUnread(n: number) { const b = $('#inbox-badge'); b.hidden = n === 0; b.textContent = String(n); }
 function showPlayer() {
   const me = store.player();
   $('#points-text').textContent = String(me.points);
@@ -110,8 +111,11 @@ async function boot() {
     needsLogin: () => store.mode === 'server' && session.requireLogin && !store.loggedIn(),
     onLogin: () => openAuth('Log in to build. Your work will carry your name.'),
     onEarn: () => openEarn(),
+    onInbox: () => void openInbox(),
     onFresh: (id) => { offerUndo(id); store.track('publish'); onboarding.published(); },
   });
+  if (session.streakBonus) setTimeout(() => toast(`Day ${session.streak} streak · +${session.streakBonus} ${CURRENCY_SHORT}`), 1500);
+  showUnread(session.unread ?? 0);
   store.track('session_start');
 
   // Undo a fresh publish for a short while. Guests get the thing that matters more: a way to keep it.
@@ -132,7 +136,7 @@ async function boot() {
   function openEarn() {
     const p = $('#earn');
     p.innerHTML = `
-      <div class="panel-head"><div><h2><span class="ms">toll</span>Earning coins</h2><div class="sub">You have ${store.player().coins} coins and ${store.player().points} points</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+      <div class="panel-head"><div><h2><span class="ms">toll</span>Earning ${CURRENCY}</h2><div class="sub">You have ${store.player().coins} ${CURRENCY_SHORT} and ${store.player().points} points</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
       <p class="sub">Every point you earn is also a coin. Points stay forever; coins get spent.</p>
       <ul class="earn">
         <li><span class="ms">home_work</span><div><b>Claim a grey building</b> · +10 coins<br><span class="sub">Tap any grey box, give it floors and a colour, publish.</span></div></li>
@@ -140,9 +144,11 @@ async function boot() {
         <li><span class="ms">park</span><div><b>Plant a tree</b> · +5 each<br><span class="sub">One tap. Ten trees is 50 coins and the Gardener badge.</span></div></li>
         <li><span class="ms">verified</span><div><b>Confirm a neighbour's work</b> · +3<br><span class="sub">Open anything someone else built and tap Confirm. They get +5.</span></div></li>
         <li><span class="ms">agriculture</span><div><b>Farm</b> · seeds cost 10 to 40, harvests pay 22 to 200<br><span class="sub">Tomato is ready in four hours. Tea and bamboo take days but pay the most.</span></div></li>
-        <li><span class="ms">sell</span><div><b>Sell</b> · 80% of the price<br><span class="sub">When someone buys a plot you own, you get most of the coins.</span></div></li>
+        <li><span class="ms">sell</span><div><b>Sell</b> · 80% of the price, and 10% forever if you built it<br><span class="sub">Set a price or take offers on anything you own. The original builder earns a royalty on every resale.</span></div></li>
+        <li><span class="ms">local_fire_department</span><div><b>Come back daily</b> · +5 to +25<br><span class="sub">A streak bonus every day, and four daily quests worth up to 45.</span></div></li>
+        <li><span class="ms">report_problem</span><div><b>Report civic issues</b> · +5, +10 when fixed<br><span class="sub">Garbage, potholes, waterlogging. Three neighbours confirming it is fixed closes it.</span></div></li>
       </ul>
-      <p class="hint">Everything on CityNovus is free. Coins are only for buying land and seeds, and you earn them by playing.</p>`;
+      <p class="hint">Everything on CityNovus is free. ${CURRENCY} cannot be bought or sold for money and cannot be sent to other players.</p>`;
     closePopovers();
     p.hidden = false;
   }
@@ -164,7 +170,7 @@ async function boot() {
   });
   setInterval(() => world.refresh(), 60_000); // crops grow
 
-  function closePopovers() { $('#board').hidden = true; $('#kind-menu').hidden = true; $('#profile').hidden = true; $('#search-results').hidden = true; $('#weather-panel').hidden = true; $('#earn').hidden = true; $('#activity').hidden = true; $('#wishlist').hidden = true; }
+  function closePopovers() { for (const id of ['board', 'kind-menu', 'profile', 'search-results', 'weather-panel', 'earn', 'activity', 'wishlist', 'inbox', 'wallet', 'board-sheet']) $('#' + id).hidden = true; }
 
   // Name
   // Saved quietly: a toast here would stomp on whatever button the user was reaching for.
@@ -244,18 +250,20 @@ async function boot() {
       ${guest ? `<button class="btn accent wide" data-act="login"><span class="ms">login</span>${session.unsaved > 0 ? `Log in to save ${session.unsaved} unsaved ${session.unsaved === 1 ? 'thing' : 'things'}` : 'Log in with Google'}</button><p class="hint centre">Guest work disappears after ${session.provisionalHours} hours.</p>` : ''}
       <div class="stat-row">
         <div class="stat-card"><b>${me.points}</b><span>points · reputation, never spent</span></div>
-        <div class="stat-card"><b>${me.coins}</b><span>coins · buy land and seeds</span></div>
+        <div class="stat-card" data-act="wallet" style="cursor:pointer"><b>${me.coins}</b><span>${CURRENCY} · tap for wallet</span></div>
       </div>
       <label>Name on your buildings<input id="profile-name" maxlength="24" value="${esc(me.name ?? '')}" placeholder="your name"></label>
       <div class="badges">${BADGES.map((bd) => `<div class="badge ${bd.test(stats) ? 'on' : ''}" title="${bd.hint}"><span>${bd.emoji}</span>${bd.label}<small>${bd.hint}</small></div>`).join('')}</div>
       <div class="owned">${KIND_IDS.filter((k) => kinds[k]).map((k) => `${KINDS[k].emoji} ${kinds[k]} ${KINDS[k].label.toLowerCase()}`).join(' · ') || 'Nothing yet. Tap a grey building.'}</div>
-      <button data-act="earn">How to earn coins</button>
+      <button data-act="wallet">Wallet, quests, streak</button>
+      <button data-act="inbox">Inbox</button>
+      <button data-act="earn">How to earn ${CURRENCY}</button>
       <button data-act="activity">What changed near me</button>
       <button data-act="wish">Which city next?</button>
       ${session.admin ? `<a class="btn tonal" href="/admin">Admin</a>` : ''}
       ${store.mode === 'server' && store.loggedIn() ? `<button data-act="logout">Log out</button>` : ''}
       <p class="hint"><a href="/privacy.html" target="_blank">Privacy</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="#" data-act="delete">Delete my account</a></p>
-      <p class="hint">You earn coins alongside points. Points are forever: ${session.flagMinPoints} unlocks flagging. Confirming a neighbour's work earns both of you coins.</p>`;
+      <p class="hint">You earn ${CURRENCY} alongside points. Points are forever: 1000 unlocks flagging and plot notes, 5000 the neighbourhood boards. Confirming a neighbour's work pays you both.</p>`;
   }
   $('#profile').addEventListener('change', async (ev) => {
     const t = ev.target as HTMLInputElement;
@@ -270,6 +278,8 @@ async function boot() {
     if (b.dataset.act === 'logout') { await store.logout(); location.reload(); }
     if (b.dataset.act === 'login') { $('#profile').hidden = true; openAuth(); }
     if (b.dataset.act === 'earn') openEarn();
+    if (b.dataset.act === 'wallet') void openWallet();
+    if (b.dataset.act === 'inbox') void openInbox();
     if (b.dataset.act === 'activity') void openActivity();
     if (b.dataset.act === 'wish') void openWishlist();
     if (b.dataset.act === 'delete') {
@@ -281,6 +291,79 @@ async function boot() {
       try { await store.deleteAccount(); toast('Account deleted.'); setTimeout(() => location.reload(), 900); } catch (e) { toast((e as Error).message, 'err'); }
     }
   });
+
+  // Inbox: offers, sales, confirmations, notes.
+  async function openInbox() {
+    const p = $('#inbox');
+    closePopovers();
+    p.innerHTML = `<div class="panel-head"><div><h2><span class="ms">notifications</span>Inbox</h2><div class="sub">Offers, sales, confirmations, notes</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div><div class="hint">Loading…</div>`;
+    p.hidden = false;
+    try {
+      const [{ items }, offers] = await Promise.all([store.inbox(), store.offers()]);
+      const ago = (t: string) => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+      const received = offers.received.map((o) => `<li class="offer"><div class="grow"><b>${esc(o.buyer_name || 'someone')}</b> offers <b>${o.amount} ${CURRENCY_SHORT}</b> for ${esc(o.plot_name || 'your ' + o.kind)}<br><span class="sub">${ago(o.created_at)}</span></div><button class="btn filled" data-offer="${o.id}" data-do="accept">Accept</button><button class="btn text" data-offer="${o.id}" data-do="decline">Decline</button></li>`).join('');
+      const made = offers.made.filter((o) => o.status === 'pending').map((o) => `<li class="offer"><div class="grow">Your <b>${o.amount} ${CURRENCY_SHORT}</b> offer on ${esc(o.plot_name || 'a ' + o.kind)} (${esc(o.owner_name || 'owner')})<br><span class="sub">waiting · ${ago(o.created_at)}</span></div><button class="btn text" data-offer="${o.id}" data-do="cancel">Cancel</button></li>`).join('');
+      p.querySelector('.hint')!.outerHTML = `${received || made ? `<ol class="feed">${received}${made}</ol>` : ''}${items.length ? `<ol class="feed">${items.map((n) => `<li data-id="${esc(n.plot_id ?? '')}" class="${n.read ? '' : 'unread'}">${esc(n.text)}<br><span class="sub">${ago(n.created_at)}</span></li>`).join('')}</ol>` : '<div class="hint">Nothing yet. Build, and people will react.</div>'}`;
+      await store.markRead(); showUnread(0);
+    } catch (e) { p.querySelector('.hint')!.textContent = (e as Error).message; }
+  }
+  $('#inbox').addEventListener('click', async (ev) => {
+    const t = ev.target as HTMLElement;
+    if (t.closest('[data-act="close"]')) { $('#inbox').hidden = true; return; }
+    const ob = t.closest<HTMLElement>('[data-offer]');
+    if (ob) { try { await store.decideOffer(Number(ob.dataset.offer), ob.dataset.do as 'accept' | 'decline' | 'cancel'); showPlayer(); toast(ob.dataset.do === 'accept' ? 'Sold. Coins are in your wallet.' : ob.dataset.do === 'decline' ? 'Declined. Their coins went back.' : 'Offer cancelled.'); void openInbox(); } catch (e) { toast((e as Error).message, 'err'); } return; }
+    const li = t.closest<HTMLElement>('li[data-id]');
+    if (li && li.dataset.id) { const f = world.feature(li.dataset.id); if (f) { $('#inbox').hidden = true; world.flyTo(centroid(f.geometry.coordinates[0])); world.select(f.properties.id); panel.open(f.properties.id); } }
+  });
+  $('#btn-inbox').addEventListener('click', () => { const open = $('#inbox').hidden; panel.close(); closePopovers(); if (open) void openInbox(); });
+  setInterval(async () => { if (store.mode !== 'server' || !document.hasFocus()) return; try { const { unread } = await store.inbox(); showUnread(unread); } catch { /* offline */ } }, 20_000);
+
+  // Wallet: balance, streak, today's quests, the ledger, the City Treasury.
+  async function openWallet() {
+    const p = $('#wallet');
+    closePopovers();
+    const me = store.player();
+    p.innerHTML = `<div class="panel-head"><div><h2><span class="ms">toll</span>${CURRENCY}</h2><div class="sub">Earned by playing. Spent on land, seeds, tall floors, shields.</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+      <div class="stat-row"><div class="stat-card"><b>${me.coins}</b><span>${CURRENCY_SHORT} in your wallet</span></div><div class="stat-card"><b>${session.streak ?? 0}</b><span>day streak · +${Math.min(5, (session.streak ?? 0) + 1) * 5} tomorrow</span></div></div>
+      <h3 class="sub-h">Today's quests</h3><div class="quests hint">Loading…</div>
+      <h3 class="sub-h">City Treasury</h3><div class="hint treasury">…</div>
+      <h3 class="sub-h">Recent</h3><ol class="feed ledger"><li class="hint">Loading…</li></ol>
+      <p class="hint">${CURRENCY} cannot be bought, sold or sent to other players. Every sale pays the owner 80%, the builder 10% and the Treasury 10%.</p>`;
+    p.hidden = false;
+    try {
+      const [q, led, tre] = await Promise.all([store.quests(), store.ledger(), store.treasury()]);
+      p.querySelector('.quests')!.outerHTML = q.quests.length ? `<div class="quests">${q.quests.map((x) => `<div class="quest ${x.done ? 'done' : ''}"><div class="grow"><b>${esc(x.label)}</b><div class="bar"><i style="width:${Math.round((x.progress / x.need) * 100)}%"></i></div><span class="sub">${x.progress}/${x.need} · +${x.reward} ${CURRENCY_SHORT}</span></div>${x.claimed ? '<span class="ms done">check_circle</span>' : x.done ? `<button class="btn filled" data-quest="${x.id}">Claim</button>` : ''}</div>`).join('')}</div>` : '<div class="quests hint">Quests need the live server.</div>';
+      p.querySelector('.treasury')!.textContent = `${tre} ${CURRENCY_SHORT} collected from sales, to be paid out as weekly prizes for the best neighbourhood and the top civic reporter.`;
+      const label: Record<string, string> = { claim: 'claimed', edit: 'edited', buy: 'bought', bought: 'bought', sold: 'sold', royalty: "builder's royalty", offer_escrow: 'offer held', offer_refund: 'offer returned', confirm: 'confirmed', confirm_photo: 'photo-verified', confirmed: 'your work confirmed', harvest: 'harvest', plant: 'seeds', tree: 'tree', landmark: 'landmark', furniture: 'furniture', civic: 'report', resolve: 'marked fixed', resolved: 'report closed', streak: 'daily streak', quest: 'quest', shield: 'shield', sale_terms: 'terms', undo: 'undo', sale_cut: 'treasury' };
+      p.querySelector('.ledger')!.innerHTML = led.length ? led.map((l) => `<li><span class="grow">${esc(label[l.reason] ?? l.reason)}${l.plot_name ? ` · ${esc(l.plot_name)}` : ''}<br><span class="sub">${new Date(l.created_at).toLocaleString()}</span></span><b class="${l.delta_coins < 0 ? 'neg' : 'pos'}">${l.delta_coins > 0 ? '+' : ''}${l.delta_coins} ${CURRENCY_SHORT}</b></li>`).join('') : '<li class="hint">Nothing yet.</li>';
+    } catch (e) { toast((e as Error).message, 'err'); }
+  }
+  $('#wallet').addEventListener('click', async (ev) => {
+    const t = ev.target as HTMLElement;
+    if (t.closest('[data-act="close"]')) { $('#wallet').hidden = true; return; }
+    const qb = t.closest<HTMLElement>('[data-quest]');
+    if (qb) { try { await store.claimQuest(qb.dataset.quest!); showPlayer(); toast(`Quest done · ${CURRENCY} added`); void openWallet(); } catch (e) { toast((e as Error).message, 'err'); } }
+  });
+  $('#coins').addEventListener('click', () => { const open = $('#wallet').hidden; panel.close(); closePopovers(); if (open) void openWallet(); });
+
+  // Neighbourhood boards: one thread per neighbourhood, posting at ${BOARD_MIN_POINTS} points.
+  async function openBoard(name: string) {
+    const p = $('#board-sheet');
+    closePopovers();
+    const me = store.player();
+    p.innerHTML = `<div class="panel-head"><div><h2><span class="ms">forum</span>${esc(name)}</h2><div class="sub">Neighbourhood board</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+      ${me.points >= BOARD_MIN_POINTS ? `<div class="row wish-row"><input name="board_text" maxlength="240" placeholder="Say it to the neighbourhood"><button class="btn filled" data-act="post" data-n="${esc(name)}"><span class="ms">send</span></button></div>` : `<div class="hint">Posting here opens at ${BOARD_MIN_POINTS} points. You have ${me.points}. Reading is free.</div>`}
+      <ol class="feed notes-feed"><li class="hint">Loading…</li></ol>`;
+    p.hidden = false;
+    try { const notes = await store.board(name); p.querySelector('.notes-feed')!.innerHTML = notes.length ? notes.map((n) => `<li><b>${esc(n.player_name || 'someone')}</b> <span class="sub">${new Date(n.created_at).toLocaleString()}</span><br>${esc(n.text)}</li>`).join('') : '<li class="hint">Quiet so far.</li>'; } catch (e) { toast((e as Error).message, 'err'); }
+  }
+  $('#board-sheet').addEventListener('click', async (ev) => {
+    const t = ev.target as HTMLElement;
+    if (t.closest('[data-act="close"]')) { $('#board-sheet').hidden = true; return; }
+    const pb = t.closest<HTMLElement>('[data-act="post"]');
+    if (pb) { const input = $<HTMLInputElement>('[name="board_text"]'); try { await store.addBoardNote(pb.dataset.n!, input.value); input.value = ''; void openBoard(pb.dataset.n!); } catch (e) { toast((e as Error).message, 'err'); } }
+  });
+  window.addEventListener('tw:board', (ev) => void openBoard((ev as CustomEvent<string>).detail));
 
   // Which city next: one vote per city per player, shown to everyone, read by the admin.
   async function openWishlist() {
@@ -371,7 +454,7 @@ async function boot() {
   const menu = $('#kind-menu');
   const menuMain = () => KIND_IDS.map((k) => `<button data-kind="${k}"><span class="ms">${KIND_ICONS[k]}</span><span>${kindLabel(k)}<small>+${KINDS[k].tracePoints}${mobile() ? '' : ' points'} · ${SHORT_HINT[KINDS[k].shape].toLowerCase()}</small></span></button>`).join('')
     + `<button data-paint="1" class="span2"><span class="ms">format_paint</span><span>${mobile() ? 'Paint many' : 'Paint many buildings'}<small>${mobile() ? 'One look, tap grey buildings' : 'Pick a colour once, then tap grey buildings one after another'}</small></span></button>`;
-  const menuSub = (k: Kind) => `<button data-back="1" class="span2"><span class="ms">arrow_back</span><span>${kindLabel(k)}</span></button>` + (k === 'landmark' ? LANDMARKS : FURNITURE).map((t) => `<button data-kind="${k}" data-sub="${t.id}"><span class="ms">${SUBTYPE_ICONS[t.id]}</span><span>${t.label}<small>+${KINDS[k].tracePoints}${mobile() ? '' : ' points · one tap'}</small></span></button>`).join('');
+  const menuSub = (k: Kind) => `<button data-back="1" class="span2"><span class="ms">arrow_back</span><span>${kindLabel(k)}</span></button>` + (k === 'landmark' ? LANDMARKS : k === 'civic' ? CIVIC : FURNITURE).map((t) => `<button data-kind="${k}" data-sub="${t.id}"><span class="ms">${SUBTYPE_ICONS[t.id]}</span><span>${t.label}<small>+${KINDS[k].tracePoints}${mobile() ? '' : ' points · one tap'}</small></span></button>`).join('');
   menu.innerHTML = menuMain();
   const traceBar = $('#trace-bar');
   $('#btn-trace').addEventListener('click', () => { const open = menu.hidden; closePopovers(); menu.hidden = !open; });
@@ -383,7 +466,7 @@ async function boot() {
     const btn = (ev.target as HTMLElement).closest<HTMLElement>('[data-kind]');
     if (!btn) return;
     const k = btn.dataset.kind as Kind;
-    if ((k === 'landmark' || k === 'furniture') && !btn.dataset.sub) { menu.innerHTML = menuSub(k); return; }
+    if ((k === 'landmark' || k === 'furniture' || k === 'civic') && !btn.dataset.sub) { menu.innerHTML = menuSub(k); return; }
     traceKind = k;
     traceSubtype = btn.dataset.sub;
     menu.innerHTML = menuMain();
@@ -443,8 +526,9 @@ async function boot() {
       showPlayer();
       board.refresh();
       store.track('place', { kind: traceKind, subtype: traceSubtype });
-      toast(`${KINDS[traceKind].emoji} Placed · +${r.gained} points`, 'ok', { label: 'Undo', ms: 30_000, fn: async () => { try { const u = await store.undo(r.plot.id); state.delete(u.id); removeFromWorld(u.id); showPlayer(); board.refresh(); toast('Undone'); } catch (e) { toast((e as Error).message, 'err'); } } });
-      if (traceKind !== 'tree') { tracer.start('point'); $('#trace-bar').hidden = false; } // keep placing furniture and landmarks until Cancel
+      toast(`${KINDS[traceKind].emoji} ${traceKind === 'civic' ? 'Reported' : 'Placed'} · +${r.gained} points`, 'ok', { label: 'Undo', ms: 30_000, fn: async () => { try { const u = await store.undo(r.plot.id); state.delete(u.id); removeFromWorld(u.id); showPlayer(); board.refresh(); toast('Undone'); } catch (e) { toast((e as Error).message, 'err'); } } });
+      if (traceKind === 'civic') { world.select(r.plot.id); panel.open(r.plot.id); } // add details and a photo straight away
+      else if (traceKind !== 'tree') { tracer.start('point'); $('#trace-bar').hidden = false; } // keep placing furniture and landmarks until Cancel
     } catch (e) { toast((e as Error).message, 'err'); }
   }
 

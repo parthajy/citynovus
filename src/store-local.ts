@@ -1,8 +1,8 @@
 // Runs the whole game inside one browser using the same rules module as the server.
 import type { Position } from 'geojson';
-import type { Activity, EditContext, EditInput, Footprint, HistoryItem, Kind, Player, Plot, Result, Session, Store } from './types';
+import type { Activity, EditContext, EditInput, Footprint, HistoryItem, Kind, Note, Player, Plot, Result, SaleStatus, Session, Store } from './types';
 import { LOCAL_FLAG_MIN_POINTS, STARTING_COINS } from './config';
-import { applyBuy, applyConfirm, applyEdit, applyFlag, applyHarvest, applyHoarding, applyPlant, canUndo, checkPlacement, checkSize, newPoint, pointRing, type Outcome } from '../shared/rules';
+import { applyBuy, applyConfirm, applyEdit, applyFlag, applyHarvest, applyHoarding, applyPlant, applyResolve, applySaleTerms, applyShield, canUndo, checkNote, checkPlacement, checkSize, newPoint, pointRing, NOTES_MIN_POINTS, type Outcome } from '../shared/rules';
 import { uuid } from './geo';
 
 const K = { player: 'tw.player', plots: 'tw.plots', confirms: 'tw.confirms', flags: 'tw.flags', log: 'tw.log' };
@@ -48,6 +48,23 @@ export class LocalStore implements Store {
   async wishlist() { const w = read<{ city: string; key: string }[]>('tw.wish', []); return { top: w.map((x) => ({ key: x.key, city: x.city, votes: 1 })), mine: w.map((x) => x.key) }; }
   async wish(city: string) { const w = read<{ city: string; key: string }[]>('tw.wish', []); const key = city.toLowerCase().trim(); if (!w.some((x) => x.key === key)) w.push({ city: city.trim(), key }); write('tw.wish', w); }
   async unwish(key: string) { write('tw.wish', read<{ city: string; key: string }[]>('tw.wish', []).filter((x) => x.key !== key)); }
+  private live(): never { throw new Error('This needs the live server. Run npm run server.'); }
+  async saleTerms(id: string, status: SaleStatus, price: number | null) { const p = this.plots.get(id); if (!p) throw new Error('Claim it first.'); return this.commit(applySaleTerms(p, this.me, status, price), 'sale_terms'); }
+  async offer(): Promise<Player> { return this.live(); }
+  async offers() { return { made: [], received: [] }; }
+  async decideOffer(): Promise<Player> { return this.live(); }
+  async shield(id: string) { const p = this.plots.get(id); if (!p) throw new Error('Claim it first.'); return this.commit(applyShield(p, this.me, this.now()), 'shield'); }
+  async resolve(id: string) { const p = this.plots.get(id); if (!p) throw new Error('No such report.'); return this.commit(applyResolve(p, this.me, this.now()), 'resolve'); }
+  async notes(id: string) { return read<Note[]>('tw.notes.' + id, []); }
+  async addNote(id: string, text: string) { const t = checkNote(text, this.me, NOTES_MIN_POINTS); const n = read<Note[]>('tw.notes.' + id, []); n.unshift({ id: Date.now(), player_name: this.me.name, text: t, created_at: this.now() }); write('tw.notes.' + id, n); }
+  async board() { return []; }
+  async addBoardNote(): Promise<void> { return this.live(); }
+  async inbox() { return { items: [], unread: 0 }; }
+  async markRead() { /* nothing */ }
+  async ledger() { return this.log.map((a) => ({ delta_points: 0, delta_coins: 0, reason: a.reason, plot_id: a.plot_id, plot_name: a.plot_name, created_at: a.time })); }
+  async quests() { return { day: '', quests: [] }; }
+  async claimQuest(): Promise<Player> { return this.live(); }
+  async treasury() { return 0; }
   async googleStart(): Promise<string> { throw new Error('Local mode has no accounts. Run the server to sign in.'); }
   async reset() { return 'Local mode has no accounts.'; }
   async loadPlots() { return [...this.plots.values()]; }
