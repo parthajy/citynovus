@@ -107,7 +107,7 @@ export class Panel {
     };
     this.draft = draft;
     const noun = SHORT_LABEL[kind].toLowerCase();
-    const title = draft.name || p.osm_name || (b ? `Unnamed ${noun}` : this.open_.isNew ? `New ${noun}` : `Grey ${noun}`);
+    const title = draft.name || draft.props.sign || p.osm_name || (b ? `Unnamed ${noun}` : this.open_.isNew ? `New ${noun}` : `Grey ${noun}`);
     const neighbourhood = b?.neighbourhood ?? this.open_.neighbourhood ?? p.neighbourhood;
     const status = this.open_.isNew ? (mobile() ? ` · +${K.tracePoints}` : ` · yours once published (+${K.tracePoints})`) : b ? '' : (mobile() ? ` · +${K.editPoints}` : ` · unclaimed (+${K.editPoints})`);
     const dis = canEdit ? '' : 'disabled';
@@ -143,8 +143,8 @@ export class Panel {
     const subFields = kind === 'landmark' || kind === 'furniture'
       ? `<label>What is it<select name="subtype" ${dis}>${opts(kind === 'landmark' ? LANDMARKS : FURNITURE, draft.props.subtype ?? (kind === 'landmark' ? 'temple' : 'streetlight'), false)}</select></label>` : '';
     const signField = kind === 'building' && draft.use && COMMERCIAL_USES.has(draft.use)
-      ? `<label>Shop sign (free, shows at street level)<input name="sign" maxlength="${SIGN_MAX}" placeholder="e.g. Bora Tea Stall" value="${esc(draft.props.sign ?? '')}" ${dis}></label>` : '';
-    const fields = (kind === 'building' ? buildingFields : kind === 'park' || kind === 'playground' ? parkFields : K.shape === 'line' && K.lanes ? lineFields : subFields) + signField;
+      ? `<label>Shop sign${mobile() ? '' : ' (street-level board, separate from the name)'}<input name="sign" maxlength="${SIGN_MAX}" placeholder="e.g. Bora Tea Stall" value="${esc(draft.props.sign ?? '')}" ${dis}></label>` : '';
+    const fields = kind === 'building' ? buildingFields : kind === 'park' || kind === 'playground' ? parkFields : K.shape === 'line' && K.lanes ? lineFields : subFields;
     const namePlaceholder = kind === 'building' ? 'Shop, school, landmark — never a private person' : kind === 'tree' ? 'Krishnachura, mango, tamul…' : `Name of the ${noun}`;
 
     // Farming: a farm, or a flat roof.
@@ -205,6 +205,7 @@ export class Panel {
       ${!needsLogin && !me.name && canEdit ? `<div class="banner"><label>Your name goes on what you build<input name="player_name" maxlength="24" placeholder="your name"></label></div>` : ''}
       ${fields}
       <label>Name<input name="name" maxlength="60" placeholder="${namePlaceholder}" value="${esc(draft.name ?? '')}" ${dis}></label>
+      ${signField}
       ${canEdit ? `<label>Photo (optional)<div class="row photo-row"><input name="photo_url" type="url" maxlength="300" placeholder="${mobile() ? 'Link or upload' : 'https://… or upload'}" value="${esc(draft.photo_url ?? '')}" ${dis}><button class="btn tonal" data-act="upload" title="Upload a photo"><span class="ms">photo_camera</span><span class="lbl">Upload</span></button><input type="file" name="photo_file" accept="image/*" capture="environment" hidden></div></label>` : ''}
       ${draft.photo_url ? `<img class="photo" src="${esc(draft.photo_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
       ${b?.props.photos?.length ? `<div class="photos">${b.props.photos.slice(-3).map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}<span class="hint">Photo-verified ${b.props.photos.length}×</span></div>` : ''}
