@@ -298,6 +298,31 @@ app.post<{ Body: { name?: string } }>('/api/me', async (req) => {
   return pub;
 });
 
+// Delete my account: personal data goes, contributions stay as open data credited to "a former player".
+app.post('/api/me/delete', async (req, reply) => {
+  const me = await requireActor(req);
+  if (isGuest(me.id)) {
+    for (const t of ['confirmations', 'flags', 'edits']) await db.query(`delete from ${t} where plot_id in (select id from plots where owner_id = $1)`, [me.id]);
+    await db.query('delete from plots where owner_id = $1', [me.id]);
+    await db.query('delete from wishlist where player_id = $1', [me.id]);
+    await db.query('delete from events where player_id = $1', [me.id]);
+    await db.query('delete from ledger where player_id = $1', [me.id]);
+    await db.query('delete from players where id = $1', [me.id]);
+  } else {
+    await db.query(`update plots set owner_name = 'a former player' where owner_id = $1`, [me.id]);
+    await db.query(`update plots set built_by_name = 'a former player' where built_by_id = $1`, [me.id]);
+    await db.query(`update plots set last_edit_by_name = 'a former player' where last_edit_by_name = (select name from players where id = $1)`, [me.id]);
+    await db.query(`update players set name = 'a former player', email = null, google_sub = null, avatar = null, password_hash = null, banned = true, ip = null where id = $1`, [me.id]);
+    await db.query('delete from sessions where player_id = $1', [me.id]);
+    await db.query('delete from tokens where player_id = $1', [me.id]);
+    await db.query('delete from wishlist where player_id = $1', [me.id]);
+    await db.query('delete from events where player_id = $1', [me.id]);
+    await adminLog('account_deleted', me.id, 'by the user');
+  }
+  reply.clearCookie(COOKIE, { path: '/' });
+  return { ok: true };
+});
+
 app.post<{ Body: { email?: string; password?: string; name?: string } }>('/api/auth/register', { config: { rateLimit: { max: 10, timeWindow: '1 hour' } } }, async (req, reply) => {
   if (!PASSWORD_AUTH) throw bad('Email sign-up is off. Continue with Google.');
   const email = String(req.body?.email ?? '').trim().toLowerCase();

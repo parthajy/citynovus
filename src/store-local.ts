@@ -43,6 +43,7 @@ export class LocalStore implements Store {
   async register() { return this.me; }
   async login() { return this.me; }
   async logout() { /* nothing to do in local mode */ }
+  async deleteAccount() { try { for (const k of Object.values(K)) localStorage.removeItem(k); } catch { /* ignore */ } }
   async forgot() { return 'Local mode has no accounts.'; }
   async wishlist() { const w = read<{ city: string; key: string }[]>('tw.wish', []); return { top: w.map((x) => ({ key: x.key, city: x.city, votes: 1 })), mine: w.map((x) => x.key) }; }
   async wish(city: string) { const w = read<{ city: string; key: string }[]>('tw.wish', []); const key = city.toLowerCase().trim(); if (!w.some((x) => x.key === key)) w.push({ city: city.trim(), key }); write('tw.wish', w); }

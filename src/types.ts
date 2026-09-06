@@ -21,6 +21,7 @@ export interface Store {
   register(email: string, password: string, name: string): Promise<Player>;
   login(email: string, password: string): Promise<Player>;
   logout(): Promise<void>;
+  deleteAccount(): Promise<void>;
   forgot(email: string): Promise<string>;
   /** Returns the URL to send the browser to for Google sign-in. */
   googleStart(): Promise<string>;

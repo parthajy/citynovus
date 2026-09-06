@@ -254,6 +254,7 @@ async function boot() {
       <button data-act="wish">Which city next?</button>
       ${session.admin ? `<a class="btn tonal" href="/admin">Admin</a>` : ''}
       ${store.mode === 'server' && store.loggedIn() ? `<button data-act="logout">Log out</button>` : ''}
+      <p class="hint"><a href="/privacy.html" target="_blank">Privacy</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="#" data-act="delete">Delete my account</a></p>
       <p class="hint">You earn coins alongside points. Points are forever: ${session.flagMinPoints} unlocks flagging. Confirming a neighbour's work earns both of you coins.</p>`;
   }
   $('#profile').addEventListener('change', async (ev) => {
@@ -271,6 +272,14 @@ async function boot() {
     if (b.dataset.act === 'earn') openEarn();
     if (b.dataset.act === 'activity') void openActivity();
     if (b.dataset.act === 'wish') void openWishlist();
+    if (b.dataset.act === 'delete') {
+      ev.preventDefault();
+      const ok = confirm(store.loggedIn()
+        ? 'Delete your account? Your email, Google link and name are removed for good. What you built stays on the map as open data, credited to "a former player".'
+        : 'Delete your guest data? Everything you built as a guest is removed.');
+      if (!ok) return;
+      try { await store.deleteAccount(); toast('Account deleted.'); setTimeout(() => location.reload(), 900); } catch (e) { toast((e as Error).message, 'err'); }
+    }
   });
 
   // Which city next: one vote per city per player, shown to everyone, read by the admin.

@@ -67,6 +67,7 @@ export class ServerStore implements Store {
   async setName(name: string) { this.me = await this.call<Player>('POST', '/api/me', { name }); this.session.player = this.me; return this.me; }
   async register(email: string, password: string, name: string) { this.me = await this.call<Player>('POST', '/api/auth/register', { email, password, name }); this.session.player = this.me; this.session.loggedIn = true; return this.me; }
   async login(email: string, password: string) { this.me = await this.call<Player>('POST', '/api/auth/login', { email, password }); this.session.player = this.me; this.session.loggedIn = true; return this.me; }
+  async deleteAccount() { await this.call('POST', '/api/me/delete'); try { localStorage.removeItem('tw.device'); } catch { /* ignore */ } }
   async logout() { await this.call('POST', '/api/auth/logout'); this.session.player = null; this.session.loggedIn = false; this.me = { id: 'guest', name: null, points: 0, coins: 0 }; }
   async forgot(email: string) { return (await this.call<{ message: string }>('POST', '/api/auth/forgot', { email })).message; }
   async wishlist() { return this.call<{ top: { key: string; city: string; votes: number }[]; mine: string[] }>('GET', '/api/wishlist'); }
