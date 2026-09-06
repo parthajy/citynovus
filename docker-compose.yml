@@ -1,0 +1,46 @@
+# One droplet, one command: docker compose up -d --build
+# Caddy terminates HTTPS for citynovus.com and forwards to the API, which serves the site too.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: citynovus
+      POSTGRES_USER: citynovus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    restart: unless-stopped
+  api:
+    build: .
+    depends_on: [db]
+    environment:
+      DATABASE_URL: postgres://citynovus:${POSTGRES_PASSWORD:-change-me}@db:5432/citynovus
+      REQUIRE_LOGIN: "false"
+      REQUIRE_VERIFIED: "false"
+      AUTH_METHODS: google
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET}"
+      ADMIN_EMAILS: "${ADMIN_EMAILS:-parthajy@gmail.com}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      FLAG_MIN_POINTS: "1000"
+      COOKIE_SECURE: "true"
+      PUBLIC_URL: "https://citynovus.com"
+      SMTP_URL: "${SMTP_URL}"
+      DATA_DIR: /data
+      NODE_ENV: production
+    volumes: ["appdata:/data"]
+    expose: ["8080"]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [api]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    restart: unless-stopped
+volumes:
+  pgdata:
+  appdata:
+  caddydata:
+  caddyconfig:

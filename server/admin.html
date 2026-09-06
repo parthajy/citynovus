@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CityNovus admin</title>
+<style>
+body{font:14px/1.45 system-ui,sans-serif;margin:0;background:#f6f4ef;color:#1c1b18}header{padding:12px 20px;background:#1c1b18;color:#fff;display:flex;gap:16px;align-items:center}header input{padding:6px 8px;border-radius:6px;border:0;width:280px}
+main{padding:16px 20px;max-width:1200px}section{background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}h2{margin:0 0 8px;font-size:16px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 8px;border-top:1px solid #eee;text-align:left;vertical-align:top}th{color:#666;font-weight:500}
+button{font:inherit;padding:5px 10px;border-radius:14px;border:1px solid #ccc;background:#fff;cursor:pointer;margin-right:4px}button.danger{color:#b3261e;border-color:#e6b8b4}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stat{background:#f1ede6;border-radius:10px;padding:10px}.stat b{display:block;font-size:22px;font-weight:500}.stat span{color:#666;font-size:12px}
+.tabs button.on{background:#1c1b18;color:#fff;border-color:#1c1b18}#msg{color:#b3261e}
+</style></head><body>
+<header><strong>CityNovus admin</strong><button id="google">Sign in with Google</button><input id="token" type="password" placeholder="or ADMIN_TOKEN"><button id="go">Load</button><span id="msg"></span></header>
+<main>
+<section><h2>People</h2><div class="stats" id="stats-people"></div></section>
+<section><h2>What they built</h2><div class="stats" id="stats-assets"></div></section>
+<section><h2>Health</h2><div class="stats" id="stats-health"></div></section>
+<section><h2>Registered users</h2><table id="users"></table></section>
+<section><h2>Which city next</h2><table id="wishlist"></table></section>
+<section><h2>Plots</h2><div class="tabs"><button data-f="flagged" class="on">Flagged</button><button data-f="hidden">Hidden</button><button data-f="recent">Recent</button></div><table id="plots"></table></section>
+<section><h2>Admin log</h2><table id="log"></table></section>
+</main>
+<script>
+const $=(s)=>document.querySelector(s);let filter='flagged';
+const tok=()=>sessionStorage.getItem('tw.admin')||$('#token').value;
+async function api(path,body){const h={'Content-Type':'application/json'};if(tok())h['Authorization']='Bearer '+tok();const r=await fetch(path,{method:body?'POST':'GET',credentials:'include',headers:h,body:body?JSON.stringify(body):undefined});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
+$('#google').onclick=async()=>{try{const r=await fetch('/api/auth/google/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const j=await r.json();if(!r.ok)throw new Error(j.error);sessionStorage.setItem('tw.admin.return','1');location.href=j.url}catch(e){$('#msg').textContent=e.message}};
+if(sessionStorage.getItem('tw.admin.return')==='1'){sessionStorage.removeItem('tw.admin.return');setTimeout(load,300)}
+const stat=(k,v)=>`<div class="stat"><b>${typeof v==='number'?(Number.isInteger(v)?v:(k.includes('rate')||k.includes('completion')?Math.round(v*100)+'%':v.toFixed(2))):esc(v)}</b><span>${esc(k.replace(/_/g,' '))}</span></div>`;
+const esc=(s)=>String(s??'').replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function load(){try{sessionStorage.setItem('tw.admin',$('#token').value||tok());$('#msg').textContent='';
+const m=await api('/api/admin/metrics');
+const groups={people:['accounts','guests','players','active_today','active_7d','day7_return_rate','day7_cohort_size','onboarding_completion','wishlist_votes'],assets:['plots','buildings','trees','farms','landmarks','furniture','parks','ponds','roads_and_flyovers','photos','builders','plots_per_builder','confirms','confirms_per_plot'],health:['unsaved_guest_plots','flagged','hidden']};
+for(const [g,keys] of Object.entries(groups))$('#stats-'+g).innerHTML=keys.filter(k=>k in m).map(k=>stat(k,m[k])).join('');
+const users=await api('/api/admin/users');$('#users').innerHTML='<tr><th>Name</th><th>Email</th><th>Joined</th><th>Last seen</th><th>Points</th><th>Plots</th><th>Buildings</th><th>Confirms</th><th></th></tr>'+users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email)}${u.verified?'':' <small>(unverified)</small>'}${u.banned?' <small style="color:#b3261e">banned</small>':''}</td><td><small>${esc(u.created_at).slice(0,10)}</small></td><td><small>${esc(u.last_seen).slice(0,16).replace('T',' ')}</small></td><td>${u.points}</td><td>${u.plots}</td><td>${u.buildings}</td><td>${u.confirmations}</td><td><button class="danger" data-a="${u.banned?'unban':'ban'}" data-id="${esc(u.id)}">${u.banned?'Unban':'Ban'}</button></td></tr>`).join('')+`<tr><td colspan="9"><small>${users.length} registered · emails: ${esc(users.map(u=>u.email).join(', '))}</small></td></tr>`;
+const wl=await api('/api/admin/wishlist');$('#wishlist').innerHTML='<tr><th>City</th><th>Votes</th><th>Who</th><th>Notes</th><th>First asked</th></tr>'+(wl.length?wl.map(w=>`<tr><td><b>${esc(w.city)}</b></td><td>${w.votes}</td><td><small>${esc(w.voters)}</small></td><td><small>${esc(w.notes||'')}</small></td><td><small>${esc(w.first_at).slice(0,10)}</small></td></tr>`).join(''):'<tr><td colspan="5">No votes yet.</td></tr>');
+const plots=await api('/api/admin/plots?filter='+filter);$('#plots').innerHTML='<tr><th>Plot</th><th>Kind</th><th>Owner</th><th>Flags</th><th>Updated</th><th></th></tr>'+plots.map(p=>`<tr><td><a href="/#b=${encodeURIComponent(p.id)}" target="_blank">${esc(p.name||p.id)}</a><br><small>${esc(p.neighbourhood)}</small></td><td>${esc(p.kind)}</td><td>${esc(p.owner_name)}<br><small>${esc(p.owner_id)}</small></td><td>${Number(p.flag_score).toFixed(1)}${p.hidden?' · hidden':''}</td><td><small>${esc(p.updated_at).slice(0,16)}</small></td><td>
+<button data-a="${p.hidden?'restore':'hide'}" data-id="${esc(p.id)}">${p.hidden?'Restore':'Hide'}</button><button data-a="rename" data-id="${esc(p.id)}">Rename</button><button class="danger" data-a="delete" data-id="${esc(p.id)}">Delete</button><button class="danger" data-a="ban" data-id="${esc(p.owner_id)}">Ban owner</button></td></tr>`).join('');
+const log=await api('/api/admin/log');$('#log').innerHTML='<tr><th>When</th><th>Action</th><th>Target</th><th>Detail</th></tr>'+log.map(l=>`<tr><td><small>${esc(l.created_at).slice(0,16)}</small></td><td>${esc(l.action)}</td><td>${esc(l.target)}</td><td>${esc(l.detail)}</td></tr>`).join('');
+}catch(e){$('#msg').textContent=e.message}}
+$('#go').onclick=load;$('#token').value=sessionStorage.getItem('tw.admin')||'';load();
+document.querySelector('.tabs').onclick=(e)=>{const b=e.target.closest('[data-f]');if(!b)return;filter=b.dataset.f;document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));load()};
+$('#users').onclick=async(e)=>{const b=e.target.closest('[data-a]');if(!b)return;try{await api('/api/admin/players/'+encodeURIComponent(b.dataset.id)+'/ban',{banned:b.dataset.a==='ban'});load()}catch(err){$('#msg').textContent=err.message}};
+$('#plots').onclick=async(e)=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,id=b.dataset.id;try{
+if(a==='ban'){if(!confirm('Ban '+id+'? Their plots stay but they cannot act.'))return;await api('/api/admin/players/'+encodeURIComponent(id)+'/ban',{banned:true})}
+else if(a==='rename'){const name=prompt('New name');if(name===null)return;await api('/api/admin/plots/'+encodeURIComponent(id),{action:'rename',name})}
+else{if(a==='delete'&&!confirm('Delete '+id+' for good?'))return;await api('/api/admin/plots/'+encodeURIComponent(id),{action:a})}
+load()}catch(err){$('#msg').textContent=err.message}};
+</script></body></html>

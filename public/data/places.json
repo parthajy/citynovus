@@ -1,0 +1,802 @@
+{
+ "bbox": "26.08,91.62,26.22,91.88",
+ "fetched_at": "2026-09-06T02:50:57.878Z",
+ "places": [
+  {
+   "id": "node/1698296623",
+   "name": "Fancy Bazaar",
+   "kind": "suburb",
+   "lon": 91.7362163,
+   "lat": 26.1799322
+  },
+  {
+   "id": "node/1698296637",
+   "name": "Kamakhya Dham",
+   "kind": "suburb",
+   "lon": 91.7063761,
+   "lat": 26.1664476
+  },
+  {
+   "id": "node/2666919781",
+   "name": "Sijubari",
+   "kind": "quarter",
+   "lon": 91.7781215,
+   "lat": 26.1305008
+  },
+  {
+   "id": "node/2885039361",
+   "name": "Amingaon",
+   "kind": "suburb",
+   "lon": 91.6699507,
+   "lat": 26.1861581
+  },
+  {
+   "id": "node/4978970932",
+   "name": "Bhagaduttapur",
+   "kind": "quarter",
+   "lon": 91.7655542,
+   "lat": 26.1352698
+  },
+  {
+   "id": "node/5623038879",
+   "name": "North Guwahati",
+   "kind": "suburb",
+   "lon": 91.7184377,
+   "lat": 26.1915072
+  },
+  {
+   "id": "node/5623038882",
+   "name": "Sunchali",
+   "kind": "suburb",
+   "lon": 91.8037641,
+   "lat": 26.2040027
+  },
+  {
+   "id": "node/6159117565",
+   "name": "Jatiya",
+   "kind": "quarter",
+   "lon": 91.7798685,
+   "lat": 26.1438881
+  },
+  {
+   "id": "node/6160665840",
+   "name": "Lokhra",
+   "kind": "suburb",
+   "lon": 91.7491912,
+   "lat": 26.1112218
+  },
+  {
+   "id": "node/6160665841",
+   "name": "Sawkuchi",
+   "kind": "suburb",
+   "lon": 91.748763,
+   "lat": 26.1234509
+  },
+  {
+   "id": "node/6160665842",
+   "name": "Sonaighuli",
+   "kind": "suburb",
+   "lon": 91.7488595,
+   "lat": 26.1277952
+  },
+  {
+   "id": "node/6160665849",
+   "name": "Dakhingaon",
+   "kind": "quarter",
+   "lon": 91.7608222,
+   "lat": 26.1311762
+  },
+  {
+   "id": "node/6160665850",
+   "name": "Rajah Nagar",
+   "kind": "quarter",
+   "lon": 91.7440842,
+   "lat": 26.1274974
+  },
+  {
+   "id": "node/6160665851",
+   "name": "Ram Nagar",
+   "kind": "quarter",
+   "lon": 91.7435945,
+   "lat": 26.1255541
+  },
+  {
+   "id": "node/6160665852",
+   "name": "Jyotikuchi",
+   "kind": "suburb",
+   "lon": 91.7354268,
+   "lat": 26.130561
+  },
+  {
+   "id": "node/6160665853",
+   "name": "Adagudam",
+   "kind": "suburb",
+   "lon": 91.7367855,
+   "lat": 26.136674
+  },
+  {
+   "id": "node/6160665854",
+   "name": "Barsapara",
+   "kind": "suburb",
+   "lon": 91.7391236,
+   "lat": 26.1449422
+  },
+  {
+   "id": "node/6160665855",
+   "name": "Lalganesh",
+   "kind": "suburb",
+   "lon": 91.7432469,
+   "lat": 26.1415953
+  },
+  {
+   "id": "node/6160665856",
+   "name": "Ganapati Nagar",
+   "kind": "quarter",
+   "lon": 91.7433575,
+   "lat": 26.1449139
+  },
+  {
+   "id": "node/6160665857",
+   "name": "Odalbakra",
+   "kind": "suburb",
+   "lon": 91.7510039,
+   "lat": 26.1401629
+  },
+  {
+   "id": "node/6160665858",
+   "name": "Bongshar",
+   "kind": "quarter",
+   "lon": 91.7599772,
+   "lat": 26.1452117
+  },
+  {
+   "id": "node/6160729422",
+   "name": "Kahilipara",
+   "kind": "suburb",
+   "lon": 91.7718397,
+   "lat": 26.1445994
+  },
+  {
+   "id": "node/6160729423",
+   "name": "Rajeeb Nagar",
+   "kind": "quarter",
+   "lon": 91.7763939,
+   "lat": 26.1462871
+  },
+  {
+   "id": "node/6160729424",
+   "name": "Kalyani Nagar",
+   "kind": "quarter",
+   "lon": 91.7712905,
+   "lat": 26.1392776
+  },
+  {
+   "id": "node/6160729425",
+   "name": "Lakhmi Nagar",
+   "kind": "quarter",
+   "lon": 91.7810211,
+   "lat": 26.1410033
+  },
+  {
+   "id": "node/6160729426",
+   "name": "Hatigaon",
+   "kind": "suburb",
+   "lon": 91.7796601,
+   "lat": 26.1325731
+  },
+  {
+   "id": "node/6160729427",
+   "name": "Juripar",
+   "kind": "quarter",
+   "lon": 91.7777719,
+   "lat": 26.1361927
+  },
+  {
+   "id": "node/6160729428",
+   "name": "Janakpur",
+   "kind": "quarter",
+   "lon": 91.7747438,
+   "lat": 26.1363607
+  },
+  {
+   "id": "node/6160729429",
+   "name": "Notboma",
+   "kind": "quarter",
+   "lon": 91.7727705,
+   "lat": 26.132848
+  },
+  {
+   "id": "node/6160729430",
+   "name": "Mulla Nagar",
+   "kind": "quarter",
+   "lon": 91.7758666,
+   "lat": 26.1263265
+  },
+  {
+   "id": "node/6160729431",
+   "name": "Anupam Nagar",
+   "kind": "quarter",
+   "lon": 91.7829093,
+   "lat": 26.1277011
+  },
+  {
+   "id": "node/6160729432",
+   "name": "Hatigaon Chariali",
+   "kind": "quarter",
+   "lon": 91.7864162,
+   "lat": 26.1290433
+  },
+  {
+   "id": "node/6160729433",
+   "name": "Milan Nagar",
+   "kind": "quarter",
+   "lon": 91.7859204,
+   "lat": 26.1223095
+  },
+  {
+   "id": "node/6160749662",
+   "name": "Bhetapara Chariali",
+   "kind": "quarter",
+   "lon": 91.7869102,
+   "lat": 26.1200483
+  },
+  {
+   "id": "node/6160749663",
+   "name": "Bhetapara",
+   "kind": "suburb",
+   "lon": 91.7854832,
+   "lat": 26.1180819
+  },
+  {
+   "id": "node/6160749664",
+   "name": "Sarboday Nagar",
+   "kind": "quarter",
+   "lon": 91.7867489,
+   "lat": 26.1131044
+  },
+  {
+   "id": "node/6160749671",
+   "name": "Lalmati",
+   "kind": "suburb",
+   "lon": 91.7885229,
+   "lat": 26.1118766
+  },
+  {
+   "id": "node/6160803210",
+   "name": "Six Mile",
+   "kind": "suburb",
+   "lon": 91.8071854,
+   "lat": 26.1309933
+  },
+  {
+   "id": "node/6160810152",
+   "name": "Beltola",
+   "kind": "suburb",
+   "lon": 91.799469,
+   "lat": 26.1241818
+  },
+  {
+   "id": "node/6160810227",
+   "name": "Japorigog",
+   "kind": "suburb",
+   "lon": 91.7887736,
+   "lat": 26.1577574
+  },
+  {
+   "id": "node/6160810292",
+   "name": "Basistha Chariali",
+   "kind": "suburb",
+   "lon": 91.7977943,
+   "lat": 26.1121506
+  },
+  {
+   "id": "node/6160815872",
+   "name": "Ambikagiri Nagar",
+   "kind": "suburb",
+   "lon": 91.7827667,
+   "lat": 26.1691174
+  },
+  {
+   "id": "node/6160816885",
+   "name": "Zoo Rd Tiniali",
+   "kind": "suburb",
+   "lon": 91.7774522,
+   "lat": 26.1753871
+  },
+  {
+   "id": "node/6160817648",
+   "name": "Chandmari",
+   "kind": "suburb",
+   "lon": 91.7740906,
+   "lat": 26.1841165
+  },
+  {
+   "id": "node/6160818202",
+   "name": "Gandh Basti",
+   "kind": "quarter",
+   "lon": 91.7677744,
+   "lat": 26.1812304
+  },
+  {
+   "id": "node/6160818822",
+   "name": "Noonmati Refinery",
+   "kind": "suburb",
+   "lon": 91.8130252,
+   "lat": 26.1836349
+  },
+  {
+   "id": "node/6160885078",
+   "name": "Hengrabari",
+   "kind": "suburb",
+   "lon": 91.8037298,
+   "lat": 26.1508008
+  },
+  {
+   "id": "node/6160885941",
+   "name": "Ganeshguri",
+   "kind": "suburb",
+   "lon": 91.7837107,
+   "lat": 26.1490223
+  },
+  {
+   "id": "node/6160886152",
+   "name": "Bhangagarh",
+   "kind": "suburb",
+   "lon": 91.7695629,
+   "lat": 26.165473
+  },
+  {
+   "id": "node/6160888960",
+   "name": "Guwahati Club",
+   "kind": "suburb",
+   "lon": 91.756824,
+   "lat": 26.1849139
+  },
+  {
+   "id": "node/6160896263",
+   "name": "Narengi",
+   "kind": "suburb",
+   "lon": 91.8292896,
+   "lat": 26.1762413
+  },
+  {
+   "id": "node/6160897372",
+   "name": "Gitanagar",
+   "kind": "suburb",
+   "lon": 91.7937356,
+   "lat": 26.1741894
+  },
+  {
+   "id": "node/6160897853",
+   "name": "Pathar Quarry",
+   "kind": "suburb",
+   "lon": 91.8298545,
+   "lat": 26.1684939
+  },
+  {
+   "id": "node/6161163702",
+   "name": "Jalukbari",
+   "kind": "suburb",
+   "lon": 91.671224,
+   "lat": 26.1554983
+  },
+  {
+   "id": "node/6161184929",
+   "name": "Borbari",
+   "kind": "suburb",
+   "lon": 91.8090488,
+   "lat": 26.1579771
+  },
+  {
+   "id": "node/6161186018",
+   "name": "Mathgharia",
+   "kind": "suburb",
+   "lon": 91.811193,
+   "lat": 26.1759804
+  },
+  {
+   "id": "node/6161187086",
+   "name": "Noonmati",
+   "kind": "suburb",
+   "lon": 91.7998576,
+   "lat": 26.1979372
+  },
+  {
+   "id": "node/6161187087",
+   "name": "Ambari",
+   "kind": "suburb",
+   "lon": 91.7539777,
+   "lat": 26.1845663
+  },
+  {
+   "id": "node/6161187286",
+   "name": "Silpukhuri",
+   "kind": "suburb",
+   "lon": 91.7630711,
+   "lat": 26.1843424
+  },
+  {
+   "id": "node/6161187904",
+   "name": "Pan Bazar",
+   "kind": "suburb",
+   "lon": 91.7472508,
+   "lat": 26.1853214
+  },
+  {
+   "id": "node/6161189285",
+   "name": "Machkhowa",
+   "kind": "suburb",
+   "lon": 91.734023,
+   "lat": 26.1755052
+  },
+  {
+   "id": "node/6161189988",
+   "name": "Bharalumukh",
+   "kind": "suburb",
+   "lon": 91.7292129,
+   "lat": 26.1716385
+  },
+  {
+   "id": "node/6161196685",
+   "name": "Birubari",
+   "kind": "suburb",
+   "lon": 91.7522351,
+   "lat": 26.1611819
+  },
+  {
+   "id": "node/6163736922",
+   "name": "Chandmari Colony",
+   "kind": "quarter",
+   "lon": 91.7698115,
+   "lat": 26.1850334
+  },
+  {
+   "id": "node/6163737300",
+   "name": "Paltan Bazar",
+   "kind": "suburb",
+   "lon": 91.7525068,
+   "lat": 26.1794742
+  },
+  {
+   "id": "node/6163737941",
+   "name": "Islumpur",
+   "kind": "quarter",
+   "lon": 91.7584726,
+   "lat": 26.1842213
+  },
+  {
+   "id": "node/6163738316",
+   "name": "Railway Colony",
+   "kind": "suburb",
+   "lon": 91.7824864,
+   "lat": 26.1808827
+  },
+  {
+   "id": "node/6163741920",
+   "name": "Shantipur",
+   "kind": "suburb",
+   "lon": 91.7275191,
+   "lat": 26.1659951
+  },
+  {
+   "id": "node/6163757445",
+   "name": "Jaya Nagar",
+   "kind": "quarter",
+   "lon": 91.8087201,
+   "lat": 26.1292012
+  },
+  {
+   "id": "node/6163762077",
+   "name": "Sarusajai",
+   "kind": "suburb",
+   "lon": 91.7605013,
+   "lat": 26.1100577
+  },
+  {
+   "id": "node/6163766750",
+   "name": "Bongaon",
+   "kind": "suburb",
+   "lon": 91.7933853,
+   "lat": 26.1177701
+  },
+  {
+   "id": "node/6163767936",
+   "name": "Games Village",
+   "kind": "quarter",
+   "lon": 91.7893151,
+   "lat": 26.1077001
+  },
+  {
+   "id": "node/6163768359",
+   "name": "Kundil Nagar",
+   "kind": "quarter",
+   "lon": 91.7967993,
+   "lat": 26.1144471
+  },
+  {
+   "id": "node/6163770086",
+   "name": "Surabh Nagar",
+   "kind": "quarter",
+   "lon": 91.8016499,
+   "lat": 26.1214231
+  },
+  {
+   "id": "node/6163772934",
+   "name": "Krishnapur",
+   "kind": "quarter",
+   "lon": 91.8013781,
+   "lat": 26.1140558
+  },
+  {
+   "id": "node/6163773241",
+   "name": "Navoday Nagar",
+   "kind": "quarter",
+   "lon": 91.8033458,
+   "lat": 26.1099022
+  },
+  {
+   "id": "node/6163776904",
+   "name": "Khanapara",
+   "kind": "suburb",
+   "lon": 91.810908,
+   "lat": 26.125094
+  },
+  {
+   "id": "node/6163777548",
+   "name": "Resham Nagar",
+   "kind": "quarter",
+   "lon": 91.8112074,
+   "lat": 26.1190281
+  },
+  {
+   "id": "node/6163778589",
+   "name": "Rukimininagar",
+   "kind": "suburb",
+   "lon": 91.7993281,
+   "lat": 26.1364298
+  },
+  {
+   "id": "node/6163779126",
+   "name": "Super Market",
+   "kind": "suburb",
+   "lon": 91.7958082,
+   "lat": 26.1404807
+  },
+  {
+   "id": "node/6163780722",
+   "name": "Wireless",
+   "kind": "suburb",
+   "lon": 91.7924167,
+   "lat": 26.1348495
+  },
+  {
+   "id": "node/6168594201",
+   "name": "Bamunimaidam",
+   "kind": "suburb",
+   "lon": 91.7886629,
+   "lat": 26.1852211
+  },
+  {
+   "id": "node/6168597952",
+   "name": "Ulubari",
+   "kind": "suburb",
+   "lon": 91.7576927,
+   "lat": 26.175003
+  },
+  {
+   "id": "node/6168646060",
+   "name": "Aathgaon",
+   "kind": "suburb",
+   "lon": 91.7401827,
+   "lat": 26.1691075
+  },
+  {
+   "id": "node/6168654474",
+   "name": "Rehabari",
+   "kind": "suburb",
+   "lon": 91.751208,
+   "lat": 26.1702255
+  },
+  {
+   "id": "node/6168655878",
+   "name": "Fatasil Ambari",
+   "kind": "suburb",
+   "lon": 91.7344457,
+   "lat": 26.1582623
+  },
+  {
+   "id": "node/6168657391",
+   "name": "Rajbhawan",
+   "kind": "suburb",
+   "lon": 91.7640008,
+   "lat": 26.1967021
+  },
+  {
+   "id": "node/6168658413",
+   "name": "Dhirenpara",
+   "kind": "suburb",
+   "lon": 91.7291425,
+   "lat": 26.1502556
+  },
+  {
+   "id": "node/6168663966",
+   "name": "Christian Basti",
+   "kind": "suburb",
+   "lon": 91.7796261,
+   "lat": 26.1541815
+  },
+  {
+   "id": "node/6168664036",
+   "name": "Ananda Nagar",
+   "kind": "suburb",
+   "lon": 91.7706055,
+   "lat": 26.1576559
+  },
+  {
+   "id": "node/6168664670",
+   "name": "Satgaon",
+   "kind": "suburb",
+   "lon": 91.8385701,
+   "lat": 26.158949
+  },
+  {
+   "id": "node/6168664671",
+   "name": "Bonda Gaon",
+   "kind": "suburb",
+   "lon": 91.841936,
+   "lat": 26.1806993
+  },
+  {
+   "id": "node/6168671977",
+   "name": "Anil Nagar",
+   "kind": "suburb",
+   "lon": 91.7731606,
+   "lat": 26.1673224
+  },
+  {
+   "id": "node/6884791085",
+   "name": "Paltan Baazar",
+   "kind": "neighbourhood",
+   "lon": 91.750173,
+   "lat": 26.1810484
+  },
+  {
+   "id": "node/8041812492",
+   "name": "Ghoramara Chariali",
+   "kind": "suburb",
+   "lon": 91.7788451,
+   "lat": 26.1206544
+  },
+  {
+   "id": "node/8325113487",
+   "name": "Kheraikuchi",
+   "kind": "suburb",
+   "lon": 91.7700729,
+   "lat": 26.1212939
+  },
+  {
+   "id": "node/9714359605",
+   "name": "Gandhi Basti",
+   "kind": "suburb",
+   "lon": 91.7619396,
+   "lat": 26.1815474
+  },
+  {
+   "id": "node/12082230957",
+   "name": "Pandu",
+   "kind": "suburb",
+   "lon": 91.6806078,
+   "lat": 26.1634597
+  },
+  {
+   "id": "node/12082267422",
+   "name": "Railway Colony",
+   "kind": "suburb",
+   "lon": 91.6997373,
+   "lat": 26.1516147
+  },
+  {
+   "id": "node/12847009719",
+   "name": "Pub Suruj Nagar",
+   "kind": "neighbourhood",
+   "lon": 91.7555192,
+   "lat": 26.13692
+  }
+ ],
+ "totals": {
+  "Amingaon": 33,
+  "Jalukbari": 566,
+  "Railway Colony": 129,
+  "Silpukhuri": 169,
+  "Bonda Gaon": 31,
+  "Jyotikuchi": 76,
+  "Games Village": 31,
+  "Ganeshguri": 39,
+  "Birubari": 18,
+  "Pandu": 58,
+  "Noonmati Refinery": 5,
+  "Guwahati Club": 76,
+  "Paltan Baazar": 15,
+  "Sawkuchi": 3,
+  "Milan Nagar": 2,
+  "Ambari": 100,
+  "Ulubari": 72,
+  "Machkhowa": 8,
+  "Pan Bazar": 69,
+  "Kamakhya Dham": 20,
+  "North Guwahati": 61,
+  "Ambikagiri Nagar": 37,
+  "Bhetapara Chariali": 1,
+  "Rehabari": 20,
+  "Sarusajai": 19,
+  "Kheraikuchi": 17,
+  "Super Market": 92,
+  "Resham Nagar": 35,
+  "Kundil Nagar": 5,
+  "Krishnapur": 7,
+  "Lalmati": 4,
+  "Dhirenpara": 12,
+  "Chandmari": 25,
+  "Wireless": 22,
+  "Jaya Nagar": 17,
+  "Ananda Nagar": 20,
+  "Paltan Bazar": 63,
+  "Beltola": 29,
+  "Zoo Rd Tiniali": 18,
+  "Six Mile": 28,
+  "Barsapara": 32,
+  "Bongaon": 13,
+  "Lalganesh": 6,
+  "Adagudam": 8,
+  "Bhagaduttapur": 31,
+  "Pub Suruj Nagar": 422,
+  "Borbari": 7,
+  "Japorigog": 13,
+  "Satgaon": 35,
+  "Aathgaon": 17,
+  "Bhangagarh": 47,
+  "Christian Basti": 31,
+  "Lokhra": 35,
+  "Khanapara": 23,
+  "Rukimininagar": 68,
+  "Gandhi Basti": 21,
+  "Fancy Bazaar": 20,
+  "Bharalumukh": 11,
+  "Shantipur": 9,
+  "Fatasil Ambari": 8,
+  "Anil Nagar": 144,
+  "Ram Nagar": 2,
+  "Rajbhawan": 27,
+  "Navoday Nagar": 13,
+  "Pathar Quarry": 7,
+  "Hengrabari": 7,
+  "Sonaighuli": 1,
+  "Hatigaon Chariali": 20,
+  "Lakhmi Nagar": 5,
+  "Chandmari Colony": 1,
+  "Dakhingaon": 3,
+  "Islumpur": 9,
+  "Narengi": 8,
+  "Surabh Nagar": 7,
+  "Bamunimaidam": 44,
+  "Gitanagar": 20,
+  "Bhetapara": 1,
+  "Notboma": 1,
+  "Mathgharia": 2,
+  "Noonmati": 3,
+  "Anupam Nagar": 1,
+  "Jatiya": 3,
+  "Gandh Basti": 4,
+  "Mulla Nagar": 1,
+  "Basistha Chariali": 3,
+  "Odalbakra": 68,
+  "Bongshar": 17
+ },
+ "counts": {
+  "flyover": 211,
+  "pond": 279,
+  "playground": 47,
+  "building": 2734,
+  "park": 60
+ }
+}

@@ -1,0 +1,27 @@
+# One word or phrase per line, case-insensitive, matched as whole words. Extend freely.
+# Kept deliberately short: false positives on real place names are worse than a missed word.
+fuck
+fucker
+fucking
+shit
+bitch
+asshole
+bastard
+cunt
+slut
+whore
+nigger
+nigga
+faggot
+retard
+chutiya
+chutiye
+madarchod
+bhenchod
+behenchod
+bhosdike
+gandu
+randi
+harami
+kutta
+suar
