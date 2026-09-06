@@ -2,12 +2,14 @@ export * from '../shared/rules';
 import { DEFAULT_FLAG_MIN_POINTS } from '../shared/rules';
 
 export const CITY = {
-  name: 'Guwahati',
-  center: [91.7505, 26.1855] as [number, number], // Ambari / Pan Bazar, the densest OSM coverage
+  name: 'Assam',
+  center: [91.7505, 26.1855] as [number, number], // start over Guwahati, Ambari / Pan Bazar
   zoom: 16,
-  // W, S, E, N — keep the camera roughly inside the data we fetched
-  bounds: [[91.55, 26.02], [91.95, 26.28]] as [[number, number], [number, number]],
+  // W, S, E, N — the whole state, with a little room around it
+  bounds: [[89.4, 23.9], [96.3, 28.2]] as [[number, number], [number, number]],
 };
+/** Vector tiles with every OSM footprint in Assam, built by scripts/build-tiles.sh. */
+export const TILES_URL = import.meta.env.VITE_TILES_URL || '/data/assam.pmtiles';
 
 export const MAP_STYLE = import.meta.env.VITE_MAP_STYLE || 'https://tiles.openfreemap.org/styles/positron';
 export const NIGHT_STYLE = import.meta.env.VITE_NIGHT_STYLE || 'https://tiles.openfreemap.org/styles/fiord';

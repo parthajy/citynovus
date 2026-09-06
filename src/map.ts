@@ -1,9 +1,12 @@
 import maplibregl, { type ExpressionSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { Protocol } from 'pmtiles';
 import type { Feature, FeatureCollection, LineString, Polygon, Position } from 'geojson';
 import type { Footprint, Kind, Plot, Props } from './types';
-import { CITY, CIVIC_SHORT, COMMERCIAL_USES, CROPS, FLOOR_HEIGHT, FLYOVER_HEIGHT, GREY, HIDDEN, MAP_STYLE, MAX_PLANTS, MAX_TREES, NIGHT_STYLE, ROOF_COLOURS, SATELLITE_ATTRIBUTION, SATELLITE_TILES, TREE_M2, cropStage, hoardingActive, lineWidth } from './config';
+import { CITY, CIVIC_SHORT, COMMERCIAL_USES, CROPS, FLOOR_HEIGHT, FLYOVER_HEIGHT, GREY, HIDDEN, MAP_STYLE, MAX_PLANTS, MAX_TREES, NIGHT_STYLE, ROOF_COLOURS, SATELLITE_ATTRIBUTION, SATELLITE_TILES, TILES_URL, TREE_M2, cropStage, hoardingActive, lineWidth } from './config';
 import { centroid, circleRing, darken, insetRing, lineSegments, ringAreaM2, scatterInRing, seeded } from './geo';
+
+maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
 export interface WorldProps {
   id: string;
@@ -43,6 +46,7 @@ const ROOF_STEPS: Record<string, { s: number; h: number }[]> = {
   dome: [{ s: 0.9, h: 0.6 }, { s: 0.72, h: 0.6 }, { s: 0.52, h: 0.6 }, { s: 0.3, h: 0.6 }],
 };
 const CANOPY = ['#4f8a4b', '#5e9a52', '#3f7a3e', '#6aa35a'];
+const OSM_MINZOOM = 11;
 
 function mix(a: string, b: string, t: number): string {
   const pa = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(a), pb = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(b);
@@ -50,7 +54,6 @@ function mix(a: string, b: string, t: number): string {
   const c = [1, 2, 3].map((i) => Math.round(parseInt(pa[i], 16) * (1 - t) + parseInt(pb[i], 16) * t).toString(16).padStart(2, '0'));
   return '#' + c.join('');
 }
-/** Wall colour after the style has its say: glass is bluish, bamboo is earthy. */
 function wallColour(colour: string | null, style: string | null): string | null {
   if (!colour) return null;
   if (style === 'modern') return mix(colour, '#a9cfe8', 0.55);
@@ -59,11 +62,18 @@ function wallColour(colour: string | null, style: string | null): string | null 
   return colour;
 }
 
+/**
+ * Two worlds on one map. The 'osm' source streams every footprint in Assam from vector tiles and draws them grey.
+ * The 'world' source holds only what players have built (with geometry), plus whatever is being previewed.
+ * A footprint that has been claimed is hidden in the tiles through feature-state, so nothing is drawn twice.
+ */
 export class WorldMap {
   readonly map: maplibregl.Map;
   night = false;
   satellite = false;
-  private features = new Map<string, WFeature>();
+  private features = new Map<string, WFeature>(); // the world source
+  private totals = new Map<string, number>(); // neighbourhood → OSM footprints, from neighbourhoods.json
+  private centres = new Map<string, [number, number]>();
   private ready: Promise<void>;
   private sun: { azimuth: number; altitude: number } | null = null;
   onSelect: (id: string | null) => void = () => {};
@@ -84,7 +94,6 @@ export class WorldMap {
     });
     this.map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
     this.ready = new Promise((res) => this.map.once('load', () => res()));
-    // Basemap styles sometimes reference sprite images they do not ship; a blank pixel keeps the console quiet.
     this.map.on('styleimagemissing', (e) => { if (!this.map.hasImage(e.id)) this.map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) }); });
   }
 
@@ -102,59 +111,61 @@ export class WorldMap {
     };
   }
 
-  async load(collection: FeatureCollection<Polygon, Partial<WorldProps>>, states: Plot[]) {
+  setTotals(list: { name: string; total: number; c: [number, number] }[]) {
+    for (const n of list) { this.totals.set(n.name, n.total); this.centres.set(n.name, n.c); }
+    const src = this.map.getSource('coverage') as maplibregl.GeoJSONSource | undefined;
+    src?.setData({ type: 'FeatureCollection', features: list.filter((n) => n.total >= 20).map((n) => ({ type: 'Feature', properties: { name: n.name, total: n.total }, geometry: { type: 'Point', coordinates: n.c } })) });
+  }
+  neighbourhoodCentre(name: string) { return this.centres.get(name); }
+
+  async load(states: Plot[]) {
     await this.ready;
-    for (const f of collection.features) {
-      const p = f.properties;
-      const id = String(p.id);
-      this.features.set(id, this.blank(id, (p.kind as Kind) ?? 'building', p.neighbourhood ?? 'Unassigned', f.geometry, {
-        osm_floors: p.osm_floors ?? null,
-        osm_name: p.osm_name ?? null,
-        osm_building: p.osm_building ?? null,
-        line: p.line ?? null,
-        floors: p.osm_floors ?? 1,
-        name: p.osm_name ?? null,
-        props: p.props ?? {},
-      }));
-    }
     for (const b of states) this.mergeState(b, false);
 
-    // The basemap draws its own flat buildings; ours replace them.
     for (const layer of this.map.getStyle().layers ?? []) {
       if (/building/i.test(layer.id)) this.map.setLayoutProperty(layer.id, 'visibility', 'none');
     }
     this.applyAtmosphere();
 
+    this.map.addSource('osm', { type: 'vector', url: `pmtiles://${TILES_URL}`, promoteId: { osm: 'id' }, minzoom: OSM_MINZOOM, maxzoom: 15 });
     this.map.addSource('world', { type: 'geojson', data: this.collection(), promoteId: 'id' });
     this.map.addSource('decor', { type: 'geojson', data: this.decor() });
     this.map.addSource('lines', { type: 'geojson', data: this.lines() });
     this.map.addSource('draw', { type: 'geojson', data: EMPTY });
+    this.map.addSource('coverage', { type: 'geojson', data: EMPTY });
 
     const kind = (...k: Kind[]) => ['in', ['get', 'kind'], ['literal', k]] as unknown as maplibregl.FilterSpecification;
     const all = (...parts: unknown[]) => ['all', ...parts] as unknown as maplibregl.FilterSpecification;
     const built: ExpressionSpecification = ['boolean', ['get', 'built'], false];
     const hidden: ExpressionSpecification = ['boolean', ['get', 'hidden'], false];
     const not = (e: ExpressionSpecification) => ['!', e] as ExpressionSpecification;
+    const taken: ExpressionSpecification = ['boolean', ['feature-state', 'taken'], false]; // claimed: drawn from the world source instead
+    const osm = { source: 'osm', 'source-layer': 'osm' } as const;
 
     this.addSatellite();
 
-    // Flat ground features, bottom to top.
-    this.map.addLayer({ id: 'park-fill', type: 'fill', source: 'world', filter: kind('park', 'playground'), paint: {
-      'fill-color': ['case', built, ['case', ['==', ['get', 'kind'], 'playground'], '#d3d98f', '#a9d18e'], '#e3ebdc'],
+    // Where the tiles have not loaded (zoomed out), show how much of each place exists to colour in.
+    this.map.addLayer({ id: 'coverage', type: 'circle', source: 'coverage', maxzoom: OSM_MINZOOM, paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, ['interpolate', ['linear'], ['get', 'total'], 20, 2, 5000, 9], 10, ['interpolate', ['linear'], ['get', 'total'], 20, 4, 5000, 18]],
+      'circle-color': '#104050', 'circle-opacity': 0.45, 'circle-stroke-color': '#fff', 'circle-stroke-width': 0.5,
     } });
-    this.map.addLayer({ id: 'farm-fill', type: 'fill', source: 'world', filter: kind('farm'), paint: {
-      'fill-color': ['case', built, '#b08d57', '#e8dcc0'],
-    } });
+    this.map.addLayer({ id: 'coverage-labels', type: 'symbol', source: 'coverage', minzoom: 8, maxzoom: OSM_MINZOOM, filter: ['>=', ['get', 'total'], 200], layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.2] }, paint: { 'text-color': '#104050', 'text-halo-color': '#fff', 'text-halo-width': 1.2 } });
+
+    // Grey Assam: everything OSM knows, from tiles.
+    this.map.addLayer({ id: 'osm-park', type: 'fill', ...osm, filter: kind('park', 'playground'), paint: { 'fill-color': '#e3ebdc', 'fill-opacity': ['case', taken, 0, 0.9] } });
+    this.map.addLayer({ id: 'osm-water', type: 'fill', ...osm, filter: kind('pond'), paint: { 'fill-color': '#dbe8f2', 'fill-opacity': ['case', taken, 0, 0.95] } });
+    this.map.addLayer({ id: 'osm-water-line', type: 'line', ...osm, filter: kind('pond'), paint: { 'line-color': '#b9cfe0', 'line-width': 1, 'line-opacity': ['case', taken, 0, 1] } });
+    this.map.addLayer({ id: 'osm-flyover', type: 'fill', ...osm, filter: kind('flyover'), paint: { 'fill-color': '#dedede', 'fill-opacity': ['case', taken, 0, 0.9] } });
+    this.map.addLayer({ id: 'osm-flyover-line', type: 'line', ...osm, filter: kind('flyover'), paint: { 'line-color': '#b9b9b9', 'line-width': 1, 'line-dasharray': [2, 2], 'line-opacity': ['case', taken, 0, 1] } });
+
+    // Built ground features.
+    this.map.addLayer({ id: 'park-fill', type: 'fill', source: 'world', filter: kind('park', 'playground'), paint: { 'fill-color': ['case', built, ['case', ['==', ['get', 'kind'], 'playground'], '#d3d98f', '#a9d18e'], '#e3ebdc'] } });
+    this.map.addLayer({ id: 'farm-fill', type: 'fill', source: 'world', filter: kind('farm'), paint: { 'fill-color': ['case', built, '#b08d57', '#e8dcc0'] } });
     this.map.addLayer({ id: 'farm-line', type: 'line', source: 'world', filter: kind('farm'), paint: { 'line-color': ['case', built, '#8a6d3b', '#d2c3a0'], 'line-width': 1 } });
-    this.map.addLayer({ id: 'water-fill', type: 'fill', source: 'world', filter: kind('pond'), paint: {
-      'fill-color': ['case', built, '#8dbfe3', '#dbe8f2'],
-    } });
+    this.map.addLayer({ id: 'water-fill', type: 'fill', source: 'world', filter: kind('pond'), paint: { 'fill-color': ['case', built, '#8dbfe3', '#dbe8f2'] } });
     this.map.addLayer({ id: 'water-line', type: 'line', source: 'world', filter: kind('pond'), paint: { 'line-color': ['case', built, '#6fa6cf', '#b9cfe0'], 'line-width': 1 } });
-    this.map.addLayer({ id: 'road-fill', type: 'fill', source: 'world', filter: kind('road'), paint: {
-      'fill-color': ['case', built, '#6f747b', '#e4e4e4'],
-    } });
+    this.map.addLayer({ id: 'road-fill', type: 'fill', source: 'world', filter: kind('road'), paint: { 'fill-color': ['case', built, '#6f747b', '#e4e4e4'] } });
     this.map.addLayer({ id: 'road-centre', type: 'line', source: 'lines', filter: ['==', ['get', 'kind'], 'road'], paint: { 'line-color': '#f5f0e6', 'line-width': 1.2, 'line-dasharray': [3, 3] } });
-    // Flyovers: the flat strip is the thing you tap; the deck itself is built from segments in decor().
     this.map.addLayer({ id: 'flyover-flat', type: 'fill', source: 'world', filter: kind('flyover'), paint: { 'fill-color': '#dedede' } });
     this.map.addLayer({ id: 'flyover-flat-line', type: 'line', source: 'world', filter: all(kind('flyover'), not(built)), paint: { 'line-color': '#b9b9b9', 'line-width': 1, 'line-dasharray': [2, 2] } });
     this.map.addLayer({ id: 'tree-fill', type: 'fill', source: 'world', filter: kind('tree'), paint: { 'fill-color': '#8fbf7a', 'fill-opacity': ['case', hidden, 0.3, 0.6] } });
@@ -164,14 +175,17 @@ export class WorldMap {
     this.map.addLayer({ id: 'rail-line', type: 'line', source: 'lines', filter: ['==', ['get', 'kind'], 'railway'], paint: { 'line-color': '#c9c9c9', 'line-width': ['interpolate', ['linear'], ['zoom'], 15, 1, 18, 2] } });
     this.map.addLayer({ id: 'wall-flat', type: 'line', source: 'world', filter: all(kind('wall'), not(built)), paint: { 'line-color': '#b9b1a3', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
     this.map.addLayer({ id: 'glow', type: 'fill-extrusion', source: 'decor', filter: ['==', ['get', 'dk'], 'glow'], paint: { 'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': 0, 'fill-extrusion-height': 0.05, 'fill-extrusion-opacity': 0.35 } });
-
-    // Trees, plants and piers sit on the ground, under buildings.
     this.map.addLayer({ id: 'walls-3d', type: 'fill-extrusion', source: 'world', filter: all(kind('wall'), built), paint: { 'fill-extrusion-color': ['case', hidden, HIDDEN, '#b8a48c'], 'fill-extrusion-height': 2, 'fill-extrusion-opacity': 0.95 } });
-    this.map.addLayer({ id: 'decor-ground', type: 'fill-extrusion', source: 'decor', filter: ['in', ['get', 'dk'], ['literal', ['trunk', 'canopy', 'pier', 'plant', 'model']]], paint: {
-      'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.95,
-    } });
+    this.map.addLayer({ id: 'decor-ground', type: 'fill-extrusion', source: 'decor', filter: ['in', ['get', 'dk'], ['literal', ['trunk', 'canopy', 'pier', 'plant', 'model']]], paint: { 'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.95 } });
 
-    // Buildings: body, optional ground-floor shopfront band, then roof caps, floor slabs, boards.
+    // Grey buildings from tiles: a claimed one drops to zero height so the coloured one shows through.
+    this.map.addLayer({ id: 'osm-buildings', type: 'fill-extrusion', ...osm, filter: kind('building'), paint: {
+      'fill-extrusion-color': GREY,
+      'fill-extrusion-height': ['case', taken, 0, ['*', ['coalesce', ['get', 'osm_floors'], 1], FLOOR_HEIGHT]],
+      'fill-extrusion-opacity': 0.94,
+      'fill-extrusion-vertical-gradient': true,
+    } });
+    // Built buildings.
     this.map.addLayer({ id: 'buildings-3d', type: 'fill-extrusion', source: 'world', filter: kind('building'), paint: {
       'fill-extrusion-color': ['case', hidden, HIDDEN, ['coalesce', ['get', 'wall'], GREY]],
       'fill-extrusion-base': ['case', ['all', built, ['boolean', ['get', 'commercial'], false]], FLOOR_HEIGHT, 0],
@@ -179,54 +193,62 @@ export class WorldMap {
       'fill-extrusion-opacity': 0.94,
       'fill-extrusion-vertical-gradient': true,
     } });
-    this.map.addLayer({ id: 'ground-3d', type: 'fill-extrusion', source: 'world', filter: all(kind('building'), built, not(hidden), ['boolean', ['get', 'commercial'], false]), paint: {
-      'fill-extrusion-color': ['coalesce', ['get', 'ground'], GREY], 'fill-extrusion-base': 0, 'fill-extrusion-height': FLOOR_HEIGHT, 'fill-extrusion-opacity': 0.94,
-    } });
-    this.map.addLayer({ id: 'decor-roof', type: 'fill-extrusion', source: 'decor', filter: ['in', ['get', 'dk'], ['literal', ['roof', 'slab', 'band', 'board', 'deck']]], paint: {
-      'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.96,
-    } });
+    this.map.addLayer({ id: 'ground-3d', type: 'fill-extrusion', source: 'world', filter: all(kind('building'), built, not(hidden), ['boolean', ['get', 'commercial'], false]), paint: { 'fill-extrusion-color': ['coalesce', ['get', 'ground'], GREY], 'fill-extrusion-base': 0, 'fill-extrusion-height': FLOOR_HEIGHT, 'fill-extrusion-opacity': 0.94 } });
+    this.map.addLayer({ id: 'decor-roof', type: 'fill-extrusion', source: 'decor', filter: ['in', ['get', 'dk'], ['literal', ['roof', 'slab', 'band', 'board', 'deck']]], paint: { 'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.96 } });
 
-    this.applyGroundOpacity();
-
-    // A guest's unsaved work: dashed outline until they log in.
     this.map.addLayer({ id: 'world-provisional', type: 'line', source: 'world', filter: ['boolean', ['get', 'provisional'], false], paint: { 'line-color': '#e07a5f', 'line-width': 2, 'line-dasharray': [1.5, 1.5] } });
     this.map.addLayer({ id: 'world-selected', type: 'line', source: 'world', filter: ['==', ['get', 'id'], ''], paint: { 'line-color': '#111', 'line-width': 3 } });
 
-    // Names once you are close enough to read them, hoardings a little earlier.
-    this.map.addLayer({ id: 'world-labels', type: 'symbol', source: 'world', minzoom: 15.5, filter: all(['to-boolean', ['get', 'name']], not(hidden), ['!', ['to-boolean', ['get', 'hoarding']]]), layout: {
-      'text-field': ['get', 'name'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 13],
-      'text-max-width': 8, 'text-padding': 4, 'symbol-sort-key': ['case', built, 0, 1],
-    }, paint: { 'text-color': '#222', 'text-halo-color': 'rgba(255,255,255,0.9)', 'text-halo-width': 1.4 } });
-    this.map.addLayer({ id: 'signs', type: 'symbol', source: 'world', minzoom: 16.5, filter: all(['to-boolean', ['get', 'sign']], not(hidden)), layout: {
-      'text-field': ['get', 'sign'], 'text-font': ['Noto Sans Bold'], 'text-size': 10, 'text-max-width': 10, 'text-offset': [0, 1.5], 'text-padding': 2, 'symbol-sort-key': 2,
-    }, paint: { 'text-color': '#1b1b1b', 'text-halo-color': '#fff3c4', 'text-halo-width': 1.6 } });
-    this.map.addLayer({ id: 'civic-labels', type: 'symbol', source: 'world', minzoom: 14, filter: all(['to-boolean', ['get', 'civic']], not(hidden)), layout: {
-      'text-field': ['get', 'civic'], 'text-font': ['Noto Sans Bold'], 'text-size': 11, 'text-offset': [0, -1.9], 'text-padding': 4, 'symbol-sort-key': 0, 'text-allow-overlap': true,
-    }, paint: { 'text-color': ['case', ['boolean', ['get', 'resolved'], false], '#2f6f5a', '#b4532f'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
-    this.map.addLayer({ id: 'hoardings', type: 'symbol', source: 'world', minzoom: 14.5, filter: all(['to-boolean', ['get', 'hoarding']], not(hidden)), layout: {
-      'text-field': ['upcase', ['get', 'hoarding']], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-max-width': 12, 'text-offset': [0, -2.2], 'text-padding': 6, 'symbol-sort-key': -1,
-    }, paint: { 'text-color': '#ffd166', 'text-halo-color': '#1b1b1b', 'text-halo-width': 2 } });
+    // Names: OSM ones from tiles until claimed, then from the world.
+    this.map.addLayer({ id: 'osm-labels', type: 'symbol', ...osm, minzoom: 15.5, filter: ['to-boolean', ['get', 'osm_name']], layout: { 'text-field': ['get', 'osm_name'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 13], 'text-max-width': 8, 'text-padding': 4, 'symbol-sort-key': 1 }, paint: { 'text-color': '#222', 'text-halo-color': 'rgba(255,255,255,0.9)', 'text-halo-width': 1.4, 'text-opacity': ['case', taken, 0, 1] } });
+    this.map.addLayer({ id: 'world-labels', type: 'symbol', source: 'world', minzoom: 15.5, filter: all(['to-boolean', ['get', 'name']], not(hidden), ['!', ['to-boolean', ['get', 'hoarding']]]), layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 13], 'text-max-width': 8, 'text-padding': 4, 'symbol-sort-key': 0 }, paint: { 'text-color': '#222', 'text-halo-color': 'rgba(255,255,255,0.9)', 'text-halo-width': 1.4 } });
+    this.map.addLayer({ id: 'signs', type: 'symbol', source: 'world', minzoom: 16.5, filter: all(['to-boolean', ['get', 'sign']], not(hidden)), layout: { 'text-field': ['get', 'sign'], 'text-font': ['Noto Sans Bold'], 'text-size': 10, 'text-max-width': 10, 'text-offset': [0, 1.5], 'text-padding': 2, 'symbol-sort-key': 2 }, paint: { 'text-color': '#1b1b1b', 'text-halo-color': '#fff3c4', 'text-halo-width': 1.6 } });
+    this.map.addLayer({ id: 'civic-labels', type: 'symbol', source: 'world', minzoom: 14, filter: all(['to-boolean', ['get', 'civic']], not(hidden)), layout: { 'text-field': ['get', 'civic'], 'text-font': ['Noto Sans Bold'], 'text-size': 11, 'text-offset': [0, -1.9], 'text-padding': 4, 'symbol-sort-key': 0, 'text-allow-overlap': true }, paint: { 'text-color': ['case', ['boolean', ['get', 'resolved'], false], '#2f6f5a', '#b4532f'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
+    this.map.addLayer({ id: 'hoardings', type: 'symbol', source: 'world', minzoom: 14.5, filter: all(['to-boolean', ['get', 'hoarding']], not(hidden)), layout: { 'text-field': ['upcase', ['get', 'hoarding']], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-max-width': 12, 'text-offset': [0, -2.2], 'text-padding': 6, 'symbol-sort-key': -1 }, paint: { 'text-color': '#ffd166', 'text-halo-color': '#1b1b1b', 'text-halo-width': 2 } });
 
     this.map.addLayer({ id: 'draw-fill', type: 'fill', source: 'draw', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#5b8def', 'fill-opacity': 0.25 } });
     this.map.addLayer({ id: 'draw-line', type: 'line', source: 'draw', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': '#5b8def', 'line-width': 2, 'line-dasharray': [2, 1] } });
-    this.map.addLayer({ id: 'draw-points', type: 'circle', source: 'draw', filter: ['==', ['geometry-type'], 'Point'], paint: {
-      'circle-radius': ['case', ['==', ['get', 'h'], 'm'], 5, 7],
-      'circle-color': ['case', ['==', ['get', 'h'], 'm'], 'rgba(255,255,255,0.6)', '#fff'],
-      'circle-stroke-color': '#5b8def', 'circle-stroke-width': 2,
-    } });
+    this.map.addLayer({ id: 'draw-points', type: 'circle', source: 'draw', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': ['case', ['==', ['get', 'h'], 'm'], 5, 7], 'circle-color': ['case', ['==', ['get', 'h'], 'm'], 'rgba(255,255,255,0.6)', '#fff'], 'circle-stroke-color': '#5b8def', 'circle-stroke-width': 2 } });
 
-    const pickable = ['buildings-3d', 'ground-3d', 'walls-3d', 'flyover-flat', 'tree-fill', 'point-fill', 'rail-fill', 'farm-fill', 'water-fill', 'park-fill', 'road-fill'];
+    this.applyGroundOpacity();
+    for (const id of this.features.keys()) if (!id.startsWith('tw/')) this.map.setFeatureState({ source: 'osm', sourceLayer: 'osm', id }, { taken: true });
+
+    const worldPick = ['buildings-3d', 'ground-3d', 'walls-3d', 'flyover-flat', 'tree-fill', 'point-fill', 'rail-fill', 'farm-fill', 'water-fill', 'park-fill', 'road-fill'];
+    const osmPick = ['osm-buildings', 'osm-flyover', 'osm-water', 'osm-park'];
     this.map.on('click', (e) => {
       if (this.onMapClick([e.lngLat.lng, e.lngLat.lat])) return;
-      const hits = this.map.queryRenderedFeatures(e.point, { layers: pickable });
-      const id = hits.length ? String(hits[0].properties.id) : null;
+      const hit = this.map.queryRenderedFeatures(e.point, { layers: worldPick })[0] ?? this.map.queryRenderedFeatures(e.point, { layers: osmPick }).find((f) => !this.features.has(String(f.properties.id)));
+      const id = hit ? String(hit.properties.id) : null;
+      if (id && !this.features.has(id) && hit) this.adopt(hit);
       this.select(id);
       this.onSelect(id);
     });
     this.map.on('mousemove', (e) => {
-      const hits = this.map.queryRenderedFeatures(e.point, { layers: [...pickable, 'draw-points'] });
+      const hits = this.map.queryRenderedFeatures(e.point, { layers: [...worldPick, ...osmPick, 'draw-points'] });
       this.map.getCanvas().style.cursor = hits.length ? 'pointer' : '';
     });
+  }
+
+  /** Copy a tile feature into the world so it can be previewed, edited and claimed. */
+  private adopt(f: { properties: Record<string, unknown>; geometry: { type: string; coordinates?: unknown } }): WFeature | null {
+    const p = f.properties as Record<string, unknown>;
+    const id = String(p.id ?? '');
+    if (!id) return null;
+    const existing = this.features.get(id);
+    if (existing) return existing;
+    const geometry = (f.geometry.type === "Polygon" ? (f.geometry as unknown as Polygon) : f.geometry.type === "MultiPolygon" ? { type: "Polygon", coordinates: (f.geometry as unknown as { coordinates: Position[][][] }).coordinates[0] } : null) as Polygon | null;
+    if (!geometry) return null;
+    let line: Position[] | null = null;
+    if (typeof p.line === 'string') { try { line = JSON.parse(p.line as string) as Position[]; } catch { line = null; } } else if (Array.isArray(p.line)) line = p.line as Position[];
+    const floors = typeof p.osm_floors === 'number' ? p.osm_floors : null;
+    const w = this.blank(id, (p.kind as Kind) ?? 'building', String(p.neighbourhood ?? 'Unassigned'), geometry, {
+      osm_floors: floors, osm_name: (p.osm_name as string | null) ?? null, osm_building: (p.osm_building as string | null) ?? null, line, floors: floors ?? 1, name: (p.osm_name as string | null) ?? null,
+      props: typeof p.lanes === 'number' ? { lanes: p.lanes as number, line: line ?? undefined } : {},
+    });
+    this.features.set(id, w);
+    this.map.setFeatureState({ source: 'osm', sourceLayer: 'osm', id }, { taken: true });
+    this.push();
+    return w;
   }
 
   /** Aerial imagery under everything but the basemap's labels. */
@@ -246,11 +268,12 @@ export class WorldMap {
     this.map.setLayoutProperty('satellite', 'visibility', on ? 'visible' : 'none');
     this.applyGroundOpacity();
   }
-  /** Unbuilt ground features fade over imagery so the real ground shows through until someone claims them. */
   private applyGroundOpacity() {
+    const taken: ExpressionSpecification = ['boolean', ['feature-state', 'taken'], false];
     const built: ExpressionSpecification = ['boolean', ['get', 'built'], false];
     const hidden: ExpressionSpecification = ['boolean', ['get', 'hidden'], false];
     const unbuilt = this.satellite ? 0.18 : 0.9;
+    for (const l of ['osm-park', 'osm-water', 'osm-flyover']) if (this.map.getLayer(l)) this.map.setPaintProperty(l, 'fill-opacity', ['case', taken, 0, unbuilt]);
     const set = (layer: string, whenBuilt: number) => { if (this.map.getLayer(layer)) this.map.setPaintProperty(layer, 'fill-opacity', ['case', hidden, 0.3, built, whenBuilt, unbuilt]); };
     set('park-fill', this.satellite ? 0.55 : 0.9);
     set('farm-fill', this.satellite ? 0.75 : 0.95);
@@ -259,7 +282,6 @@ export class WorldMap {
     if (this.map.getLayer('flyover-flat')) this.map.setPaintProperty('flyover-flat', 'fill-opacity', ['case', built, 0.04, this.satellite ? 0.25 : 0.9]);
   }
 
-  /** Light and sky for the time of day. Called on load, on night/day changes, and after a basemap swap. */
   private applyAtmosphere() {
     const sun = this.sun;
     if (this.night) this.map.setLight({ anchor: 'map', position: [1.3, 200, 60], intensity: 0.18, color: '#c9d4ff' });
@@ -273,12 +295,11 @@ export class WorldMap {
   }
   setSun(sun: { azimuth: number; altitude: number }) { this.sun = sun; if (this.map.loaded()) this.applyAtmosphere(); }
 
-  /** Swap the basemap for night, carrying our sources and layers across. */
   async setNight(night: boolean) {
     if (this.night === night) return;
     this.night = night;
     await this.ready;
-    const mine = new Set(['world', 'decor', 'lines', 'draw', 'satellite']);
+    const mine = new Set(['osm', 'world', 'decor', 'lines', 'draw', 'satellite', 'coverage']);
     await new Promise<void>((res) => {
       this.map.once('style.load', () => res());
       this.map.setStyle(night ? NIGHT_STYLE : MAP_STYLE, {
@@ -297,22 +318,35 @@ export class WorldMap {
     this.addSatellite();
     this.applyGroundOpacity();
     this.applyAtmosphere();
-    this.push(); // windows light up
+    for (const id of this.features.keys()) if (!id.startsWith('tw/')) this.map.setFeatureState({ source: 'osm', sourceLayer: 'osm', id }, { taken: true });
+    this.push();
   }
 
-  collection(): FeatureCollection<Polygon, WorldProps> {
-    return { type: 'FeatureCollection', features: [...this.features.values()] };
+  collection(): FeatureCollection<Polygon, WorldProps> { return { type: 'FeatureCollection', features: [...this.features.values()] }; }
+  /** A world feature, adopting it from the loaded tiles if needed. */
+  feature(id: string) {
+    const w = this.features.get(id);
+    if (w) return w;
+    const hit = this.map.getSource('osm') ? this.map.querySourceFeatures('osm', { sourceLayer: 'osm', filter: ['==', ['get', 'id'], id] })[0] : undefined;
+    return hit ? this.adopt(hit) ?? undefined : undefined;
   }
-  feature(id: string) { return this.features.get(id); }
+  /** Everything on the ground nearby: world features plus whatever tiles are loaded. */
   *footprints(): Iterable<Footprint> {
-    for (const f of this.features.values()) yield { id: f.properties.id, kind: f.properties.kind, ring: f.geometry.coordinates[0], hidden: f.properties.hidden };
+    const seen = new Set<string>();
+    for (const f of this.features.values()) { seen.add(f.properties.id); yield { id: f.properties.id, kind: f.properties.kind, ring: f.geometry.coordinates[0], hidden: f.properties.hidden }; }
+    if (!this.map.getSource('osm')) return;
+    for (const f of this.map.querySourceFeatures('osm', { sourceLayer: 'osm' })) {
+      const id = String(f.properties.id);
+      if (seen.has(id) || f.geometry.type !== 'Polygon') continue;
+      seen.add(id);
+      yield { id, kind: f.properties.kind as Kind, ring: f.geometry.coordinates[0] };
+    }
   }
   private push() {
     (this.map.getSource('world') as maplibregl.GeoJSONSource | undefined)?.setData(this.collection());
     (this.map.getSource('decor') as maplibregl.GeoJSONSource | undefined)?.setData(this.decor());
     (this.map.getSource('lines') as maplibregl.GeoJSONSource | undefined)?.setData(this.lines());
   }
-  /** Crops grow in real time; call now and then so they visibly do. */
   refresh() { (this.map.getSource('decor') as maplibregl.GeoJSONSource | undefined)?.setData(this.decor()); }
 
   private lines(): FeatureCollection<LineString, { kind: Kind }> {
@@ -324,7 +358,6 @@ export class WorldMap {
     return { type: 'FeatureCollection', features: out };
   }
 
-  /** Roof caps, floor slabs, trees, crops, piers and hoarding boards, generated from the built features. */
   private decor(): FeatureCollection<Polygon, DecorProps> {
     const out: Feature<Polygon, DecorProps>[] = [];
     const add = (ring: Position[], props: DecorProps) => out.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: props });
@@ -338,7 +371,6 @@ export class WorldMap {
       const colour = stage > 0.85 ? c.ripe : mix(c.colour, c.ripe, Math.max(0, stage - 0.5));
       for (const pt of scatterInRing(ring, n, rnd)) add(circleRing(pt, 0.45 + rnd() * 0.2, 6), { dk: 'plant', base, height: base + 0.15 + stage * c.height * (0.8 + rnd() * 0.4), colour });
     };
-    // Tiny procedural models. Axis-aligned boxes and cylinders are enough at city scale.
     const rect = (c: Position, w: number, h: number, dx = 0, dy = 0): Position[] => {
       const kx = 111320 * Math.cos((c[1] * Math.PI) / 180), ky = 111320;
       const cx = c[0] + dx / kx, cy = c[1] + dy / ky;
@@ -379,7 +411,6 @@ export class WorldMap {
         let top = p.floors * FLOOR_HEIGHT;
         const roofBase = top;
         for (const st of steps) { add(insetRing(ring, st.s), { dk: 'roof', base: top, height: top + st.h, colour }); top += st.h; }
-        // Floors: a thin ledge between floors and a window band on each one, lit at night.
         const step = Math.max(1, Math.ceil(p.floors / 14));
         const glass = p.style === 'modern' ? '#5d7f9c' : mix(wall, '#2a3a4a', 0.55);
         const band = this.night ? '#ffd98a' : glass;
@@ -398,7 +429,6 @@ export class WorldMap {
       } else if (p.kind === 'landmark' || p.kind === 'furniture') {
         model(p.kind, p.props.subtype, centroid(ring));
       } else if (p.kind === 'civic') {
-        // a marker pole with a coloured head: orange while open, green once fixed
         const c = centroid(ring);
         const head = p.resolved ? '#3d8b6e' : '#e07a5f';
         add(circleRing(c, 0.18, 6), { dk: 'model', base: 0, height: 4.2, colour: '#4a4f57' });
@@ -410,18 +440,12 @@ export class WorldMap {
         const rnd = seeded(p.id);
         for (const pt of scatterInRing(ring, n, rnd)) tree(pt, rnd);
       } else if (p.kind === 'flyover' && p.line) {
-        // A deck that rises from the ground on player-traced flyovers (they include the approaches) and arches gently on OSM spans.
         const width = lineWidth('flyover', p.props.lanes);
         const segs = lineSegments(p.line, width, 8);
         const L = segs[0]?.lengthM ?? 0;
         const ramped = p.id.startsWith('tw/') && L > 60;
         const rampFrac = Math.min(0.4, 60 / Math.max(L, 1));
-        const hAt = (t: number) => {
-          if (!ramped) return FLYOVER_HEIGHT + 1.2 * Math.sin(Math.PI * t);
-          const e = Math.min(t, 1 - t) / rampFrac;
-          const k = e >= 1 ? 1 : e * e * (3 - 2 * e);
-          return FLYOVER_HEIGHT * k + 0.8 * Math.sin(Math.PI * t);
-        };
+        const hAt = (t: number) => { if (!ramped) return FLYOVER_HEIGHT + 1.2 * Math.sin(Math.PI * t); const e = Math.min(t, 1 - t) / rampFrac; const k = e >= 1 ? 1 : e * e * (3 - 2 * e); return FLYOVER_HEIGHT * k + 0.8 * Math.sin(Math.PI * t); };
         const deck = this.night ? '#3a3f47' : '#4f545b';
         let sincePier = 99;
         for (const sg of segs) {
@@ -435,16 +459,15 @@ export class WorldMap {
     return { type: 'FeatureCollection', features: out };
   }
 
-  /** Apply a stored plot onto its footprint. Creates the footprint for player-made plots. */
+  /** Apply a stored plot onto the world. Every stored plot carries its geometry, so no tile is needed. */
   mergeState(b: Plot, push = true) {
     let f = this.features.get(b.id);
     if (!f) {
-      if (!b.geometry) return; // an OSM footprint we no longer have; ignore
+      if (!b.geometry) return;
       f = this.blank(b.id, b.kind, b.neighbourhood, b.geometry);
       this.features.set(b.id, f);
-    } else if (b.geometry) {
-      f.geometry = b.geometry; // a player re-shaped it
-    }
+      if (!b.id.startsWith('tw/') && this.map.getSource('osm')) this.map.setFeatureState({ source: 'osm', sourceLayer: 'osm', id: b.id }, { taken: true });
+    } else if (b.geometry) f.geometry = b.geometry;
     const p = f.properties;
     p.kind = b.kind ?? p.kind;
     p.floors = b.floors ?? p.osm_floors ?? 1;
@@ -468,7 +491,6 @@ export class WorldMap {
     if (push) this.push();
   }
 
-  /** Temporary look while the panel is open; mergeState/resetPreview undo it. */
   preview(id: string, patch: Partial<Pick<WorldProps, 'floors' | 'colour' | 'roof' | 'style' | 'commercial' | 'props' | 'name'>>, geometry?: Polygon) {
     const f = this.features.get(id);
     if (!f) return;
@@ -479,28 +501,27 @@ export class WorldMap {
     if (geometry) f.geometry = geometry;
     this.push();
   }
+  /** Back to how it was: a saved plot returns to its saved state, an unclaimed footprint goes back to the tiles. */
   resetPreview(id: string, saved: Plot | null, originalGeometry?: Polygon) {
     const f = this.features.get(id);
     if (!f) return;
     if (originalGeometry) f.geometry = originalGeometry;
     if (saved) { this.mergeState(saved); return; }
-    const p = f.properties;
-    p.floors = p.osm_floors ?? 1; p.colour = null; p.wall = null; p.roof = null; p.style = null; p.commercial = false; p.name = p.osm_name; p.built = false; p.provisional = false;
-    this.push();
+    this.remove(id);
   }
 
   addTraced(id: string, geometry: Polygon, neighbourhood: string, kind: Kind, props: Props) {
     this.features.set(id, this.blank(id, kind, neighbourhood, geometry, { props, line: props.line ?? null }));
     this.push();
   }
-  remove(id: string) { this.features.delete(id); this.push(); }
+  remove(id: string) {
+    this.features.delete(id);
+    if (!id.startsWith('tw/') && this.map.getSource('osm')) this.map.removeFeatureState({ source: 'osm', sourceLayer: 'osm', id });
+    this.push();
+  }
 
-  select(id: string | null) {
-    this.map.setFilter('world-selected', ['==', ['get', 'id'], id ?? '']);
-  }
-  flyTo(lonlat: [number, number], zoom = 17.5) {
-    this.map.flyTo({ center: lonlat, zoom, pitch: 55, essential: true });
-  }
+  select(id: string | null) { this.map.setFilter('world-selected', ['==', ['get', 'id'], id ?? '']); }
+  flyTo(lonlat: [number, number], zoom = 17.5) { this.map.flyTo({ center: lonlat, zoom, pitch: 55, essential: true }); }
   toggle3D(): boolean {
     const flat = this.map.getPitch() > 5;
     this.map.easeTo(flat ? { pitch: 0, bearing: 0 } : { pitch: 55, bearing: -17 }, { duration: 600 });
@@ -513,7 +534,6 @@ export class WorldMap {
     if (shape === 'polygon' && points.length >= 3) features.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[...points, points[0]]] } });
     (this.map.getSource('draw') as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features });
   }
-  /** Vertex and midpoint handles for the shape editor. */
   setHandles(pts: Position[], mids: Position[], closed: boolean) {
     const features: Feature[] = [];
     if (pts.length >= 2) features.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: closed ? [...pts, pts[0]] : pts } });
@@ -522,15 +542,15 @@ export class WorldMap {
     (this.map.getSource('draw') as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features });
   }
 
-  /** Per-neighbourhood totals for the leaderboard. */
+  /** Per-neighbourhood totals for the leaderboard: OSM totals from the index, built counts from the world. */
   stats(): { neighbourhood: string; total: number; built: number; civic: number }[] {
     const m = new Map<string, { total: number; built: number; civic: number }>();
+    for (const [name, total] of this.totals) m.set(name, { total, built: 0, civic: 0 });
     for (const f of this.features.values()) {
       const n = f.properties.neighbourhood;
       const s = m.get(n) ?? { total: 0, built: 0, civic: 0 };
       if (f.properties.kind === 'civic') { if (f.properties.built && !f.properties.hidden && !f.properties.resolved) s.civic++; m.set(n, s); continue; }
-      s.total++;
-      if (f.properties.built && !f.properties.hidden) s.built++;
+      if (f.properties.built && !f.properties.hidden) { s.built++; if (f.properties.id.startsWith('tw/')) s.total++; }
       m.set(n, s);
     }
     return [...m.entries()].map(([neighbourhood, s]) => ({ neighbourhood, ...s }));

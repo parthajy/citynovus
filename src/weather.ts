@@ -36,8 +36,8 @@ export function severe(w: Weather): string | null {
   return null;
 }
 
-export async function fetchWeather(): Promise<Weather> {
-  const [lon, lat] = CITY.center;
+export async function fetchWeather(at: [number, number] = CITY.center): Promise<Weather> {
+  const [lon, lat] = at;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,wind_speed_10m&hourly=precipitation_probability,precipitation&forecast_hours=8&timezone=Asia%2FKolkata`;
   const j = await (await fetch(url)).json();
   const c = j.current;
@@ -60,7 +60,7 @@ export function sunPosition(date: Date, lat: number, lon: number): { altitude: n
   const azimuth = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)); // from south, westward
   return { altitude: altitude / rad, azimuth: ((azimuth / rad + 180) % 360 + 360) % 360 }; // azimuth clockwise from north
 }
-export const isNight = (date = new Date()) => sunPosition(date, CITY.center[1], CITY.center[0]).altitude < -4;
+export const isNight = (date = new Date(), at: [number, number] = CITY.center) => sunPosition(date, at[1], at[0]).altitude < -4;
 
 // ---- rain, thunder, stars, fog ----
 export class WeatherFX {

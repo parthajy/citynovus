@@ -1,5 +1,5 @@
 import './style.css';
-import type { FeatureCollection, Polygon } from 'geojson';
+import type { Polygon } from 'geojson';
 import type { Plot, Props, Session, Store } from './types';
 import { BACKEND, BADGES, BOARD_MIN_POINTS, CIVIC, CURRENCY, CURRENCY_SHORT, FURNITURE, KINDS, KIND_ICONS, KIND_IDS, LANDMARKS, PALETTE, ROOFS, SHORT_HINT, SHORT_LABEL, SUBTYPE_ICONS, checkPlacement, checkSize, lineWidth, type Kind } from './config';
 import { WeatherFX, describe, fetchWeather, isNight, severe, sunPosition, type Weather } from './weather';
@@ -7,7 +7,7 @@ import { enableRipples, mountControls } from './controls';
 import { LoginScreen } from './login';
 import { LocalStore } from './store-local';
 import { ServerStore } from './store-server';
-import { WorldMap, type WorldProps } from './map';
+import { WorldMap } from './map';
 import { Tracer } from './draw';
 import { ShapeEditor } from './editor';
 import { Panel } from './panel';
@@ -83,12 +83,15 @@ async function boot() {
   store = useServer ? new ServerStore() : new LocalStore();
   store.attachWorld(() => world.footprints());
 
-  const [sess, geojson, placesJson, searchIndex] = await Promise.all([
+  const [sess, placesJson, totals] = await Promise.all([
     store.init(),
-    fetch('/data/world.geojson').then((r) => r.json()) as Promise<FeatureCollection<Polygon, Partial<WorldProps>>>,
     fetch('/data/places.json').then((r) => r.json()) as Promise<{ places: Place[] }>,
-    fetch('/data/search.json').then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<{ n: string; t: string; c: [number, number] }[]>,
+    fetch('/data/neighbourhoods.json').then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<{ name: string; total: number; c: [number, number] }[]>,
   ]);
+  // The search index is a few megabytes for all of Assam; fetch it the first time someone searches.
+  let searchIndex: { n: string; t: string; c: [number, number] }[] = [];
+  let searchLoading: Promise<void> | null = null;
+  const ensureSearch = () => (searchLoading ??= fetch('/data/search.json').then((r) => (r.ok ? r.json() : [])).then((j) => { searchIndex = j; }).catch(() => { searchIndex = []; }));
   session = sess;
   const places = placesJson.places;
   $('#mode').textContent = store.mode === 'local' ? 'local mode: everything stays in this browser' : session.requireLogin ? 'live · log in to build' : 'live';
@@ -96,7 +99,8 @@ async function boot() {
   let stored: Plot[] = [];
   try { stored = await store.loadPlots(); } catch (e) { toast('Could not load the world: ' + (e as Error).message, 'err'); }
   for (const b of stored) state.set(b.id, b);
-  await world.load(geojson, stored);
+  await world.load(stored);
+  world.setTotals(totals);
   showPlayer();
 
   enableRipples();
@@ -214,11 +218,12 @@ async function boot() {
     const score = (n: string) => { const l = n.toLowerCase(); return l === q ? 0 : l.startsWith(q) ? 1 : l.includes(' ' + q) ? 2 : l.includes(q) ? 3 : 9; };
     const own = [...state.values()].filter((p) => p.name).map((p) => ({ n: p.name!, t: `${KINDS[p.kind].label.toLowerCase()} · by ${p.owner_name ?? 'someone'}`, c: centroid((world.feature(p.id)?.geometry ?? p.geometry!).coordinates[0]) as [number, number] }));
     const hits = [...own, ...searchIndex].map((h) => ({ h, s: score(h.n) })).filter((x) => x.s < 9).sort((a, b) => a.s - b.s || a.h.n.length - b.h.n.length).slice(0, 7);
-    if (!hits.length) { results.innerHTML = `<div class="hint" style="padding:10px 14px">Nothing called that in Guwahati yet. Add it, and it will be searchable.</div>`; results.hidden = false; return; }
+    if (!hits.length) { results.innerHTML = `<div class="hint" style="padding:10px 14px">${searchIndex.length ? 'Nothing called that in Assam yet. Add it, and it will be searchable.' : 'Loading the index…'}</div>`; results.hidden = false; return; }
     results.innerHTML = hits.map(({ h }) => `<button data-lon="${h.c[0]}" data-lat="${h.c[1]}"><b>${esc(h.n)}</b> <span class="sub">${esc(h.t)}</span></button>`).join('');
     results.hidden = false;
   };
-  search.addEventListener('input', runSearch);
+  search.addEventListener('focus', () => { void ensureSearch(); });
+  search.addEventListener('input', () => { if (!searchIndex.length && searchLoading) { void ensureSearch().then(runSearch); } runSearch(); });
   search.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') { results.hidden = true; search.blur(); }
     if (ev.key === 'Enter') { runSearch(); results.querySelector<HTMLElement>('button')?.click(); }
@@ -369,7 +374,7 @@ async function boot() {
   async function openWishlist() {
     const p = $('#wishlist');
     closePopovers();
-    p.innerHTML = `<div class="panel-head"><div><h2><span class="ms">location_city</span>Which city next?</h2><div class="sub">Guwahati is first. Tell us where CityNovus should go after.</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+    p.innerHTML = `<div class="panel-head"><div><h2><span class="ms">location_city</span>Where next?</h2><div class="sub">Assam is first. Tell us which state or city CityNovus should open after.</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
       <div class="row wish-row"><input name="wish_city" maxlength="60" placeholder="Your city, e.g. Jorhat"><button class="btn filled" data-act="vote"><span class="ms">how_to_vote</span>Vote</button></div>
       <p id="wish-msg" class="sub"></p><ol class="feed wish-list"><li class="hint">Loading…</li></ol>`;
     p.hidden = false;
@@ -558,7 +563,7 @@ async function boot() {
     if (state.get(id)) { toast('Already claimed. Grey ones only.', 'err'); return true; }
     if (!(await requireIdentity())) return true;
     try {
-      const r = await store.edit(id, { kind: 'building', geometry: null, neighbourhood: f.properties.neighbourhood }, { floors: paint.floors, colour: paint.colour, style: null, roof: paint.roof, name: f.properties.osm_name, use: null, photo_url: null, props: {} });
+      const r = await store.edit(id, { kind: 'building', geometry: f.geometry, neighbourhood: f.properties.neighbourhood }, { floors: paint.floors, colour: paint.colour, style: null, roof: paint.roof, name: f.properties.osm_name, use: null, photo_url: null, props: {} });
       state.set(id, r.plot); world.mergeState(r.plot); showPlayer(); board.refresh();
       store.track('paint');
       toast(`+${r.gained} · keep tapping`, 'ok', { label: 'Undo', ms: 10_000, fn: async () => { try { const u = await store.undo(id); state.delete(u.id); removeFromWorld(u.id); showPlayer(); } catch (e) { toast((e as Error).message, 'err'); } } });
@@ -574,18 +579,23 @@ async function boot() {
   const applySky = async () => {
     const night = isNight();
     document.documentElement.dataset.theme = night ? 'dark' : 'light';
-    world.setSun(sunPosition(new Date(), CITY.center[1], CITY.center[0]));
+    const cc = world.map.getCenter();
+    world.setSun(sunPosition(new Date(), cc.lat, cc.lng));
     await world.setNight(night);
     fx.apply(weather, night, world.map.getPitch());
   };
   world.map.on('pitch', () => fx.apply(weather, world.night, world.map.getPitch()));
+  let weatherAt: [number, number] | null = null;
   const loadWeather = async () => {
     try {
-      weather = await fetchWeather();
+      const c = world.map.getCenter();
+      weatherAt = [c.lng, c.lat];
+      weather = await fetchWeather(weatherAt);
       const d = describe(weather);
       $('#weather').hidden = false;
       $('#weather .ms').textContent = d.icon;
       $('#weather-text').textContent = `${Math.round(weather.temp)}° ${d.label}`;
+      $('.city').textContent = nearestPlace(weatherAt, places.filter((p) => p.kind === 'city' || p.kind === 'town'))?.name ?? 'Assam';
       const alert = severe(weather);
       if (alert) toast(`⚠ ${alert}. Live alerts on banpani.org`, 'err');
     } catch { /* offline: the map is still fine */ }
@@ -593,13 +603,14 @@ async function boot() {
   };
   await loadWeather();
   setInterval(loadWeather, 10 * 60_000);
+  world.map.on('moveend', () => { const c = world.map.getCenter(); if (weatherAt && Math.hypot(c.lng - weatherAt[0], c.lat - weatherAt[1]) > 0.25) void loadWeather(); });
   setInterval(applySky, 60_000);
   $('#weather').addEventListener('click', () => {
     const p = $('#weather-panel'); const open = p.hidden; closePopovers(); if (!open || !weather) return;
     const d = describe(weather);
     const alert = severe(weather);
     p.innerHTML = `
-      <div class="panel-head"><div><h2><span class="ms">${d.icon}</span>Guwahati now</h2><div class="sub">Open-Meteo · ${weather.time.replace('T', ' ')} · updates every 10 min</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+      <div class="panel-head"><div><h2><span class="ms">${d.icon}</span>${esc($('.city').textContent || 'Here')} now</h2><div class="sub">Open-Meteo · ${weather.time.replace('T', ' ')} · updates every 10 min</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
       <div class="wx-now"><span class="ms">${d.icon}</span><div><b>${Math.round(weather.temp)}°</b> <span class="sub">feels ${Math.round(weather.feels)}°</span><div>${d.label} · ${weather.humidity}% humidity · wind ${Math.round(weather.wind)} km/h · cloud ${weather.cloud}%</div></div></div>
       ${alert ? `<div class="banner warn">⚠ ${alert}. Official alerts and relief on <a href="https://banpani.org" target="_blank" rel="noopener">banpani.org</a>.</div>` : ''}
       <div class="sub">Rain chance, next 8 hours</div>

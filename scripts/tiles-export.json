@@ -1,0 +1,6 @@
+{
+  "attributes": { "type": true, "id": true },
+  "linear_tags": ["highway", "railway", "waterway", "barrier"],
+  "area_tags": ["building", "natural=water", "landuse", "leisure", "amenity", "shop", "tourism", "place", "historic"],
+  "include_tags": ["building", "building:levels", "name", "natural", "landuse", "leisure", "highway", "bridge", "lanes", "place", "amenity", "shop", "tourism", "historic", "railway", "water"]
+}

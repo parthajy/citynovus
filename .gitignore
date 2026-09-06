@@ -4,3 +4,6 @@ dist
 .env.local
 .DS_Store
 /data/
+
+# Built by scripts/build-tiles.sh (92 MB); rsynced by deploy/deploy.sh, not committed
+/public/data/assam.pmtiles

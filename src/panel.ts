@@ -446,8 +446,8 @@ export class Panel {
         changes.colour = this.draft?.colour ?? null;
         const f = this.d.world.feature(id)!;
         if (f.properties.line && !changes.props.line) changes.props.line = f.properties.line;
-        const ctx = { kind: this.kind(), geometry: this.geometry, neighbourhood: this.open_.neighbourhood ?? f.properties.neighbourhood };
         const fresh = !this.d.state.get(id);
+        const ctx = { kind: this.kind(), geometry: this.geometry ?? (fresh ? f.geometry : null), neighbourhood: this.open_.neighbourhood ?? f.properties.neighbourhood };
         await this.act(() => store.edit(id, ctx, changes), (r) => `Published · +${r.gained} points`);
         this.originalGeometry = null;
         if (fresh) this.d.onFresh(id);

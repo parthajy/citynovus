@@ -1,5 +1,7 @@
 // Colours in a few hundred buildings around well-known spots so the city is never empty on day one.
-// Usage: API=http://localhost:8080 SEED=300 node scripts/seed.mjs
+// Footprints come from a GeoJSON or GeoJSONSeq file: the osm.geojsonl that scripts/build-tiles.sh writes
+// (set KEEP_GEOJSONL=1 to keep it), or any FeatureCollection with id/kind/neighbourhood/osm_floors/osm_name props.
+// Usage: SEED_FILE=public/data/osm.geojsonl API=http://localhost:8080 SEED=300 node scripts/seed.mjs
 import { readFileSync } from 'node:fs';
 
 const API = (process.env.API ?? 'http://localhost:8080').replace(/\/$/, '');
@@ -11,8 +13,9 @@ const ROOFS = ['tin', 'tin', 'tiled', 'flat', 'flat', 'thatch'];
 const USES = ['house', 'house', 'house', 'shop', 'shop', 'restaurant', 'office', 'school'];
 const STYLES = ['assam-type', 'rcc', 'rcc', 'shophouse', 'colonial'];
 
-const world = JSON.parse(readFileSync('public/data/world.geojson', 'utf8'));
-const buildings = world.features.filter((f) => f.properties.kind === 'building');
+const raw = readFileSync(process.env.SEED_FILE ?? 'public/data/osm.geojsonl', 'utf8');
+const features = raw.trimStart().startsWith('{"type":"FeatureCollection"') ? JSON.parse(raw).features : raw.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l.charCodeAt(0) === 0x1e ? l.slice(1) : l));
+const buildings = features.filter((f) => f.properties.kind === 'building' && f.geometry?.type === 'Polygon');
 const centroid = (r) => { let x = 0, y = 0; for (const p of r) { x += p[0]; y += p[1]; } return [x / r.length, y / r.length]; };
 const d2 = (a, b) => ((a[0] - b[0]) * 0.9) ** 2 + (a[1] - b[1]) ** 2;
 const ranked = buildings.map((f) => { const c = centroid(f.geometry.coordinates[0]); return { f, d: Math.min(...CENTRES.map((k) => d2(c, k))) }; }).sort((a, b) => a.d - b.d);
@@ -44,7 +47,7 @@ for (const { f } of ranked) {
   const floors = f.properties.osm_floors ?? (use === 'house' ? 1 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 4));
   try {
     await call('POST', `/api/plots/${encodeURIComponent(id)}/edit`, {
-      ctx: { kind: 'building', geometry: null, neighbourhood: f.properties.neighbourhood },
+      ctx: { kind: 'building', geometry: f.geometry, neighbourhood: f.properties.neighbourhood },
       changes: { floors, colour: pick(PALETTE), style: pick(STYLES), roof: pick(ROOFS), name: f.properties.osm_name ?? null, use, photo_url: null, props: {} },
     });
     done++;

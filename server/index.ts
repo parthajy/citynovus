@@ -46,7 +46,7 @@ mkdirSync(PHOTO_DIR, { recursive: true });
 const COOKIE = 'tw_session';
 
 const db = await openDb();
-const world = new World(process.env.WORLD_FILE ?? path.join(ROOT, 'public/data/world.geojson'), process.env.PLACES_FILE ?? path.join(ROOT, 'public/data/places.json'));
+const world = new World(process.env.TILES_FILE ?? path.join(ROOT, 'public/data/assam.pmtiles'), process.env.PLACES_FILE ?? path.join(ROOT, 'public/data/places.json'));
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, bodyLimit: 512 * 1024, trustProxy: true });
 await app.register(cookie);
 // An empty body with a JSON content type is a common client slip; treat it as {}.
@@ -180,9 +180,12 @@ async function expireProvisional() {
 setInterval(() => { expireProvisional().catch((e) => app.log.error(e)); }, 10 * 60_000).unref();
 async function guard(q: Queryable, kind: Plot['kind'], ring: Position[], selfId?: string, meId?: string) {
   checkSize(kind, ring);
-  // Other guests' unsaved work is invisible to this player, so it must not block them either.
-  const rows = await q.query('select id, kind, geometry, hidden from plots where not provisional or owner_id = $1', [meId ?? '']);
-  checkPlacement(kind, ring, world.footprints(rows as never), selfId);
+  // Only plots near the new shape matter; other guests' unsaved work is invisible to this player, so it must not block them either.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of ring) { if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y; }
+  const rows = await q.query(`select id, kind, geometry, hidden from plots where geometry is not null and (not provisional or owner_id = $1)
+    and (geometry->'coordinates'->0->0->>0)::float between $2 and $3 and (geometry->'coordinates'->0->0->>1)::float between $4 and $5`, [meId ?? '', minX - 0.01, maxX + 0.01, minY - 0.01, maxY + 0.01]);
+  checkPlacement(kind, ring, await world.footprintsNear(ring, rows as never), selfId);
 }
 async function rateLimit(q: Queryable, playerId: string) {
   const r = await q.query<{ n: string }>(`select count(*) as n from edits where player_id = $1 and created_at > now() - interval '1 minute'`, [playerId]);
@@ -493,8 +496,11 @@ app.post<{ Params: { id: string }; Body: { ctx: EditContext; changes: EditInput 
       await q.query('delete from plots where id = $1', [id]);
       existing = null;
     }
-    if (!existing && !ctx.geometry && !world.has(id)) throw bad('Unknown feature.');
-    if (ctx.geometry) await guard(q, existing?.kind ?? ctx.kind, ctx.geometry.coordinates[0], id, me.id);
+    if (!existing && !ctx.geometry) throw bad('Send the footprint with a first claim.');
+    if (!existing && !id.startsWith('tw/') && ctx.geometry && !(await world.has(id, ctx.geometry.coordinates[0][0]))) throw bad('Unknown feature.');
+    // A first claim of an OSM footprint carries its geometry so everyone can render it without the tile; it is not a reshape.
+    const reshaped = !!ctx.geometry && (!!existing?.geometry || id.startsWith('tw/'));
+    if (ctx.geometry && (reshaped || !existing)) await guard(q, existing?.kind ?? ctx.kind, ctx.geometry.coordinates[0], id, me.id);
     moderate(changes.name, 'A name');
     moderate(changes.props?.sign, 'A sign');
     const o = applyEdit(existing, id, ctx, changes, me, now());
@@ -615,6 +621,17 @@ app.get('/api/admin/civic.csv', async (req, reply) => {
 app.get('/api/admin/notes', async (req) => { await requireAdminAsync(req); return db.query('select id, plot_id, board, player_name, text, hidden, created_at from notes order by id desc limit 100'); });
 app.post<{ Params: { id: string }; Body: { hidden?: boolean } }>('/api/admin/notes/:id', async (req) => { await requireAdminAsync(req); await db.query('update notes set hidden = $2 where id = $1', [Number(req.params.id), !!req.body?.hidden]); await adminLog(req.body?.hidden ? 'hide_note' : 'show_note', req.params.id); return { ok: true }; });
 app.post<{ Params: { id: string }; Body: { days?: number } }>('/api/admin/players/:id/touch', async (req) => { await requireAdminAsync(req); await db.query(`update players set last_seen = now() - ($2 || ' days')::interval where id = $1`, [req.params.id, String(Number(req.body?.days ?? 0))]); return { ok: true }; });
+app.post<{ Body: { geometries?: Record<string, unknown> } }>('/api/admin/backfill-geometry', { bodyLimit: 64 * 1024 * 1024 }, async (req) => {
+  await requireAdminAsync(req);
+  const g = req.body?.geometries ?? {};
+  let n = 0;
+  for (const r of await db.query<{ id: string }>('select id from plots where geometry is null')) {
+    const geom = g[r.id]; if (!geom) continue;
+    await db.query('update plots set geometry = $2 where id = $1', [r.id, JSON.stringify(geom)]); n++;
+  }
+  for (const p of (await db.query(`${PLOT_SELECT} where p.geometry is not null and not p.provisional`)).map(rowToPlot)) broadcast(p);
+  return { filled: n };
+});
 app.get('/api/admin/log', async (req) => { await requireAdminAsync(req); return db.query('select * from admin_log order by id desc limit 100'); });
 app.get('/api/admin/metrics', async (req) => {
   await requireAdminAsync(req);
@@ -917,7 +934,10 @@ await app.register(fstatic, { root: PHOTO_DIR, prefix: '/photos/', decorateReply
 // Static site, when built.
 const dist = path.join(ROOT, 'dist');
 if (existsSync(dist)) {
-  await app.register(fstatic, { root: dist, wildcard: false, decorateReply: true });
+  await app.register(fstatic, { root: dist, wildcard: false, decorateReply: true, acceptRanges: true, setHeaders: (res, filePath) => {
+    // The tile archive is read with HTTP range requests; let browsers keep it for a day between data refreshes.
+    if (filePath.endsWith('.pmtiles')) res.setHeader('Cache-Control', 'public, max-age=86400');
+  } });
   app.setNotFoundHandler((req, reply) => {
     if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
     return reply.status(404).send({ error: 'Not found' });

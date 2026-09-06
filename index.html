@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#104050">
-  <title>CityNovus — Guwahati builds its own map</title>
-  <meta name="description" content="Claim your street and colour in your city, block by block. CityNovus is a free, community-built 3D map of Guwahati on open data: buildings, parks, farms, trees, flyovers, all made by the people who live there.">
+  <title>CityNovus — Assam builds its own map</title>
+  <meta name="description" content="Claim your street and colour in your town, block by block. CityNovus is a free, community-built 3D map of Assam: every building OpenStreetMap knows, from Guwahati to Dibrugarh, waiting for someone who lives there to make it real.">
   <link rel="canonical" href="https://citynovus.com/">
   <meta name="robots" content="index,follow,max-image-preview:large">
-  <meta name="keywords" content="CityNovus, Guwahati map, 3D map Guwahati, Assam, community map, OpenStreetMap, build your city">
+  <meta name="keywords" content="CityNovus, Assam map, 3D map Assam, Guwahati map, Jorhat, Dibrugarh, Silchar, Tezpur, community map, OpenStreetMap, build your city">
   <meta name="author" content="CityNovus">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://citynovus.com/">
@@ -18,14 +18,14 @@
   <meta property="og:image:height" content="630">
   <meta property="og:locale" content="en_IN">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="CityNovus — Guwahati builds its own map">
+  <meta name="twitter:title" content="CityNovus — Assam builds its own map">
   <meta name="twitter:description" content="Claim your street and colour in your city, block by block. Free, open data, made by the people who live there.">
   <meta name="twitter:image" content="https://citynovus.com/og.png">
   <script type="application/ld+json">
   {"@context":"https://schema.org","@graph":[
     {"@type":"Organization","name":"CityNovus","url":"https://citynovus.com/","logo":"https://citynovus.com/icon-512.png"},
     {"@type":"WebSite","name":"CityNovus","url":"https://citynovus.com/"},
-    {"@type":"WebApplication","name":"CityNovus","url":"https://citynovus.com/","applicationCategory":"GameApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},"description":"A free, community-built 3D map of Guwahati. Claim your street, colour in buildings, plant trees, farm terraces."}
+    {"@type":"WebApplication","name":"CityNovus","url":"https://citynovus.com/","applicationCategory":"GameApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},"description":"A free, community-built 3D map of Assam. Claim your street, colour in buildings, plant trees, farm terraces."}
   ]}
   </script>
   <!-- Google tag (gtag.js) -->
@@ -44,8 +44,8 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=swap">
-  <meta property="og:title" content="CityNovus — Guwahati builds its own map">
-  <meta property="og:description" content="Only 2,734 buildings in Guwahati exist on any open map. Claim one, give it floors, a roof and a colour, farm the terrace, plant trees. Trace the rest.">
+  <meta property="og:title" content="CityNovus — Assam builds its own map">
+  <meta property="og:description" content="Over a million buildings across Assam sit grey on the open map. Claim yours, give it floors, a roof and a colour, and put your town on the map.">
 </head>
 <body>
   <div id="map"></div>
@@ -59,7 +59,7 @@
       <div id="search-results" class="surface elev" hidden></div>
     </div>
     <div class="me">
-      <button id="weather" class="chip" title="Live weather in Guwahati" hidden><span class="ms">cloud</span><span id="weather-text">…</span></button>
+      <button id="weather" class="chip" title="Live weather here" hidden><span class="ms">cloud</span><span id="weather-text">…</span></button>
       <button id="unsaved" class="chip warn" title="Guest work disappears unless you log in" hidden><span class="ms">cloud_off</span><span id="unsaved-text">Unsaved</span></button>
       <button id="btn-inbox" class="btn icon" title="Inbox"><span class="ms">notifications</span><span id="inbox-badge" class="badge-dot" hidden>0</span></button>
       <button id="points" class="chip" title="Points: your reputation. Never spent. 1000 unlocks flagging."><span class="ms">stars</span><span id="points-text">0</span></button>
@@ -108,7 +108,7 @@
     <div class="login-card surface elev">
       <img class="login-logo" src="/citynovus.png" alt="">
       <h1>CityNovus</h1>
-      <p class="tagline">Guwahati, built by the people who live in it.</p>
+      <p class="tagline">Assam, built by the people who live in it.</p>
       <p id="login-reason" class="sub"></p>
       <button id="login-google" class="btn filled google" data-login="google"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.3l7.8 6.1C12.3 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.8-4.6l-7.8-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.3 0-11.7-4.2-13.6-10l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continue with Google</button>
       <p id="login-none" class="hint" hidden>Sign-in is being set up. You can keep exploring and building meanwhile.</p>

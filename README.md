@@ -2,9 +2,10 @@
 
 **citynovus.com — India builds its own 3D map.**
 
-Google has 3D buildings for a handful of Indian metros. OpenStreetMap has 2,734 building
-footprints for all of Guwahati. Nobody has a visual map of India. CityNovus lets a city
-colour itself in, block by block, and makes it a game.
+Google has 3D buildings for a handful of Indian metros. OpenStreetMap knows about a
+million building footprints across Assam, most of them grey boxes nobody has looked at.
+Nobody has a visual map of India. CityNovus lets a state colour itself in, block by block,
+and makes it a game. Assam is open first; the wishlist decides where it goes next.
 
 Every OSM footprint starts as a grey box. Tap one, give it floors, a roof, a colour and a
 name, and it rises in front of you with a roof cap and, for shops, a darker shopfront.
@@ -20,9 +21,29 @@ into OSM and can never be taken private.
 
 ```bash
 npm install
-npm run fetch-osm     # pulls Guwahati buildings, water, parks, flyovers + neighbourhoods into public/data
+# build the Assam tiles once (see "The map data" below), or drop a ready assam.pmtiles into public/data
 npm run dev           # http://localhost:5173 — local mode, everything stays in this browser
 ```
+
+## The map data
+
+Every OSM footprint in Assam is served as vector tiles from one file, `public/data/assam.pmtiles`
+(about 92 MB, not committed). The browser streams only the tiles on screen; the API reads the
+same file for guardrails, so nobody can claim a footprint that does not exist or trace over one
+that does. Built plots store their own geometry, so they render without the tiles. To build it:
+
+```bash
+brew install osmium-tool tippecanoe                       # apt: osmium-tool; tippecanoe from source
+curl -O https://download.geofabrik.de/asia/india-latest.osm.pbf   # 1.7 GB
+scripts/build-tiles.sh india-latest.osm.pbf scripts/assam-boundary.geojson
+```
+
+That clips Assam out of the India extract (OSM relation 2025886, saved in `scripts/assam-boundary.geojson`),
+keeps buildings, water, parks, playgrounds and bridges, and writes `assam.pmtiles` plus
+`places.json` (named places), `neighbourhoods.json` (per-place totals for the leaderboard)
+and `search.json` (roads, places and points of interest for the search box). Takes about five
+minutes on a laptop. Another state is the same script with a different boundary; the client
+bounds live in `src/config.ts`. `deploy/deploy.sh` rsyncs the archive with everything else.
 
 Local mode is the whole game with no backend, good enough to demo and to play alone.
 
@@ -88,8 +109,9 @@ basemap's labels on top, which is also the easiest way to trace accurate footpri
 
 ## Weather and night
 
-The map runs on the real sky. Open-Meteo (no key) gives Guwahati's current conditions every ten
-minutes; the sun's position is computed from the clock and the city's coordinates. When the sun
+The map runs on the real sky. Open-Meteo (no key) gives the current conditions wherever the map
+is centred, refreshed every ten minutes and whenever you move more than a district away; the
+sun's position is computed from the clock and the map centre. When the sun
 is below the horizon the basemap swaps to a blue-grey night style (readable, not black), the
 app chrome goes dark, window bands light up and stars come out over the horizon. Rain, drizzle, thunder flashes and fog
 are drawn on a canvas over the map in proportion to what is actually falling. Severe conditions
@@ -166,7 +188,11 @@ landmarks, never private people; that is a flag reason.
 ## Layout
 
 ```
-scripts/fetch-osm.mjs        Overpass → public/data/{world.geojson, places.json}
+scripts/build-tiles.sh       Geofabrik PBF → public/data/{assam.pmtiles, places, neighbourhoods, search}.json
+scripts/tiles-prepare.mjs    classifies OSM features, pre-buffers bridges, assigns neighbourhoods
+scripts/assam-boundary.geojson  the state outline used to clip the extract
+scripts/backfill-geometry.mjs   one-off: gives plots claimed before tiles their footprint geometry
+server/world.ts              reads the same PMTiles for guardrails and neighbourhood lookup
 shared/rules.ts              THE RULES: kinds, points, coins, prices, crops, guardrails, every action
 shared/geo.ts                geometry helpers, overlap tests
 src/config.ts                city, palette, styles, badges, UI lists
