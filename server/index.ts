@@ -934,9 +934,11 @@ await app.register(fstatic, { root: PHOTO_DIR, prefix: '/photos/', decorateReply
 // Static site, when built.
 const dist = path.join(ROOT, 'dist');
 if (existsSync(dist)) {
-  await app.register(fstatic, { root: dist, wildcard: false, decorateReply: true, acceptRanges: true, setHeaders: (res, filePath) => {
-    // The tile archive is read with HTTP range requests; let browsers keep it for a day between data refreshes.
-    if (filePath.endsWith('.pmtiles')) res.setHeader('Cache-Control', 'public, max-age=86400');
+  await app.register(fstatic, { root: dist, wildcard: false, decorateReply: true, acceptRanges: true, cacheControl: false, setHeaders: (res, filePath) => {
+    // Hashed bundles never change; the tile archive (read by range requests) changes once per data refresh; everything else is checked each visit.
+    if (filePath.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    else if (filePath.endsWith('.pmtiles')) res.setHeader('Cache-Control', 'public, max-age=86400');
+    else res.setHeader('Cache-Control', 'no-cache');
   } });
   app.setNotFoundHandler((req, reply) => {
     if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
