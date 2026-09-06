@@ -586,6 +586,7 @@ async function boot() {
   };
   world.map.on('pitch', () => fx.apply(weather, world.night, world.map.getPitch()));
   let weatherAt: [number, number] | null = null;
+  let here = 'Assam';
   const loadWeather = async () => {
     try {
       const c = world.map.getCenter();
@@ -594,8 +595,8 @@ async function boot() {
       const d = describe(weather);
       $('#weather').hidden = false;
       $('#weather .ms').textContent = d.icon;
-      $('#weather-text').textContent = `${Math.round(weather.temp)}° ${d.label}`;
-      $('.city').textContent = nearestPlace(weatherAt, places.filter((p) => p.kind === 'city' || p.kind === 'town'))?.name ?? 'Assam';
+      here = nearestPlace(weatherAt, places.filter((p) => p.kind === 'city' || p.kind === 'town'))?.name ?? 'Assam';
+      $('#weather-text').textContent = `${Math.round(weather.temp)}° ${d.label} · ${here}`;
       const alert = severe(weather);
       if (alert) toast(`⚠ ${alert}. Live alerts on banpani.org`, 'err');
     } catch { /* offline: the map is still fine */ }
@@ -610,7 +611,7 @@ async function boot() {
     const d = describe(weather);
     const alert = severe(weather);
     p.innerHTML = `
-      <div class="panel-head"><div><h2><span class="ms">${d.icon}</span>${esc($('.city').textContent || 'Here')} now</h2><div class="sub">Open-Meteo · ${weather.time.replace('T', ' ')} · updates every 10 min</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
+      <div class="panel-head"><div><h2><span class="ms">${d.icon}</span>${esc(here)} now</h2><div class="sub">Open-Meteo · ${weather.time.replace('T', ' ')} · updates every 10 min</div></div><button class="btn icon" data-act="close" aria-label="Close"><span class="ms">close</span></button></div>
       <div class="wx-now"><span class="ms">${d.icon}</span><div><b>${Math.round(weather.temp)}°</b> <span class="sub">feels ${Math.round(weather.feels)}°</span><div>${d.label} · ${weather.humidity}% humidity · wind ${Math.round(weather.wind)} km/h · cloud ${weather.cloud}%</div></div></div>
       ${alert ? `<div class="banner warn">⚠ ${alert}. Official alerts and relief on <a href="https://banpani.org" target="_blank" rel="noopener">banpani.org</a>.</div>` : ''}
       <div class="sub">Rain chance, next 8 hours</div>

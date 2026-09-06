@@ -4,10 +4,10 @@
 //   <out>/neighbourhoods.json   per-neighbourhood totals and centroids, for the leaderboard
 //   <out>/search.json           named roads, places and points of interest, for the in-app search
 // Usage: node scripts/tiles-prepare.mjs <export.geojsonl> <outdir>
-import { createReadStream, mkdirSync, writeFileSync, createWriteStream } from 'node:fs';
+import { createReadStream, mkdirSync, writeFileSync, createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-const [,, input, out = 'public/data'] = process.argv;
+const [,, input, out = 'public/data', districtsFile = 'scripts/assam-districts.geojson'] = process.argv;
 if (!input) { console.error('usage: node scripts/tiles-prepare.mjs export.geojsonl [outdir]'); process.exit(1); }
 mkdirSync(out, { recursive: true });
 const LANE_WIDTH = 3.5;
@@ -56,6 +56,18 @@ await pass((f) => {
   }
 });
 console.log(`  ${places.length} places, ${search.length} searchable names`);
+
+// Districts: every place belongs to one, and a place name that repeats across districts gets the district appended,
+// so "Bhaktagaon (Nagaon)" and "Bhaktagaon (Jorhat)" stay apart on the leaderboard.
+const districts = existsSync(districtsFile) ? JSON.parse(readFileSync(districtsFile, 'utf8')).features.map((f) => ({ name: f.properties.name.replace(/\s+district$/i, '').trim(), rings: f.geometry.type === 'Polygon' ? [f.geometry.coordinates[0]] : f.geometry.coordinates.map((p) => p[0]) })) : [];
+for (const d of districts) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const r of d.rings) for (const [x, y] of r) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } d.bbox = [x0, y0, x1, y1]; }
+const pip = (pt, ring) => { let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1]; if (((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi)) inside = !inside; } return inside; };
+const districtOf = (lon, lat) => { for (const d of districts) { const b = d.bbox; if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue; if (d.rings.some((r) => pip([lon, lat], r))) return d.name; } return null; };
+for (const p of places) p.district = districtOf(p.lon, p.lat) ?? 'Assam';
+const byName = new Map();
+for (const p of places) { const set = byName.get(p.name) ?? new Set(); set.add(p.district); byName.set(p.name, set); }
+for (const p of places) if (byName.get(p.name).size > 1 && p.district !== 'Assam' && p.district !== p.name) p.name = `${p.name} (${p.district})`; // the district's namesake town keeps its plain name
+console.log(`  ${districts.length} districts; ${[...byName.values()].filter((s) => s.size > 1).length} place names repeat across districts`);
 // grid for nearest place: 0.05° cells
 const G = 0.05, grid = new Map();
 const gk = (x, y) => `${Math.floor(x / G)}_${Math.floor(y / G)}`;
@@ -84,7 +96,7 @@ await pass((f) => {
   else { const poly = g.type === 'Polygon' ? g.coordinates[0] : g.type === 'MultiPolygon' ? g.coordinates[0][0] : null; if (!poly || poly.length < 4) return; ring = poly.map(([x, y]) => [+x.toFixed(7), +y.toFixed(7)]); }
   const cen = centroid(ring); const np = nearest(cen[0], cen[1]);
   const neighbourhood = np ? np.name : 'Unassigned';
-  const tt = totals.get(neighbourhood) ?? { total: 0, x: 0, y: 0 }; tt.total++; tt.x += cen[0]; tt.y += cen[1]; totals.set(neighbourhood, tt);
+  const tt = totals.get(neighbourhood) ?? { total: 0, x: 0, y: 0, district: np?.district ?? 'Assam' }; tt.total++; tt.x += cen[0]; tt.y += cen[1]; totals.set(neighbourhood, tt);
   counts[c.kind] = (counts[c.kind] ?? 0) + 1;
   const levels = parseInt(t['building:levels'] ?? '', 10);
   const props = { id: `${t['@type'] === 'relation' ? 'rel' : 'way'}/${t['@id']}`, kind: c.kind, neighbourhood, osm_floors: c.kind === 'building' && Number.isFinite(levels) ? Math.min(levels, 60) : null, osm_name: t.name ?? null, osm_building: t.building && t.building !== 'yes' ? t.building : null };
@@ -93,8 +105,11 @@ await pass((f) => {
   if (++n % 100000 === 0) console.log(`  ${n} features`);
 });
 await new Promise((r) => outStream.end(r));
-writeFileSync(`${out}/places.json`, JSON.stringify({ places: places.map(({ id, name, kind, lon, lat }) => ({ id, name, kind, lon, lat })) }));
-writeFileSync(`${out}/neighbourhoods.json`, JSON.stringify([...totals.entries()].map(([name, t]) => ({ name, total: t.total, c: [+(t.x / t.total).toFixed(5), +(t.y / t.total).toFixed(5)] })).sort((a, b) => b.total - a.total)));
+writeFileSync(`${out}/places.json`, JSON.stringify({ places: places.map(({ id, name, kind, lon, lat, district }) => ({ id, name, kind, lon, lat, district })) }));
+writeFileSync(`${out}/neighbourhoods.json`, JSON.stringify([...totals.entries()].map(([name, t]) => ({ name, district: t.district, total: t.total, c: [+(t.x / t.total).toFixed(5), +(t.y / t.total).toFixed(5)] })).sort((a, b) => b.total - a.total)));
+const dTotals = new Map();
+for (const t of totals.values()) { const d = dTotals.get(t.district) ?? { total: 0, x: 0, y: 0 }; d.total += t.total; d.x += t.x; d.y += t.y; dTotals.set(t.district, d); }
+writeFileSync(`${out}/districts.json`, JSON.stringify(districts.map((d) => { const t = dTotals.get(d.name) ?? { total: 0, x: 0, y: 0 }; const c = t.total ? [+(t.x / t.total).toFixed(4), +(t.y / t.total).toFixed(4)] : [(d.bbox[0] + d.bbox[2]) / 2, (d.bbox[1] + d.bbox[3]) / 2]; return { name: d.name, total: t.total, c, bbox: d.bbox.map((v) => +v.toFixed(4)) }; }).sort((a, b) => b.total - a.total)));
 search.sort((a, b) => a.n.localeCompare(b.n));
 writeFileSync(`${out}/search.json`, JSON.stringify(search));
 console.log(`done: ${n} footprints`, counts, `| ${totals.size} neighbourhoods`);

@@ -74,6 +74,7 @@ export class WorldMap {
   private features = new Map<string, WFeature>(); // the world source
   private totals = new Map<string, number>(); // neighbourhood → OSM footprints, from neighbourhoods.json
   private centres = new Map<string, [number, number]>();
+  private districts = new Map<string, string>(); // neighbourhood → district
   private ready: Promise<void>;
   private sun: { azimuth: number; altitude: number } | null = null;
   onSelect: (id: string | null) => void = () => {};
@@ -111,12 +112,20 @@ export class WorldMap {
     };
   }
 
-  setTotals(list: { name: string; total: number; c: [number, number] }[]) {
-    for (const n of list) { this.totals.set(n.name, n.total); this.centres.set(n.name, n.c); }
+  setTotals(list: { name: string; district?: string; total: number; c: [number, number] }[]) {
+    for (const n of list) { this.totals.set(n.name, n.total); this.centres.set(n.name, n.c); this.districts.set(n.name, n.district ?? 'Assam'); }
     const src = this.map.getSource('coverage') as maplibregl.GeoJSONSource | undefined;
     src?.setData({ type: 'FeatureCollection', features: list.filter((n) => n.total >= 20).map((n) => ({ type: 'Feature', properties: { name: n.name, total: n.total }, geometry: { type: 'Point', coordinates: n.c } })) });
   }
   neighbourhoodCentre(name: string) { return this.centres.get(name); }
+  districtOf(neighbourhood: string) { return this.districts.get(neighbourhood) ?? 'Assam'; }
+  /** The neighbourhood whose centre is closest to a point (used to guess the district under the camera). */
+  nearestNeighbourhood(lon: number, lat: number): string | null {
+    const kx = Math.cos((lat * Math.PI) / 180);
+    let best: string | null = null, bd = Infinity;
+    for (const [name, c] of this.centres) { const d = ((c[0] - lon) * kx) ** 2 + (c[1] - lat) ** 2; if (d < bd) { bd = d; best = name; } }
+    return best;
+  }
 
   async load(states: Plot[]) {
     await this.ready;
@@ -543,7 +552,7 @@ export class WorldMap {
   }
 
   /** Per-neighbourhood totals for the leaderboard: OSM totals from the index, built counts from the world. */
-  stats(): { neighbourhood: string; total: number; built: number; civic: number }[] {
+  stats(): { neighbourhood: string; district: string; total: number; built: number; civic: number }[] {
     const m = new Map<string, { total: number; built: number; civic: number }>();
     for (const [name, total] of this.totals) m.set(name, { total, built: 0, civic: 0 });
     for (const f of this.features.values()) {
@@ -553,7 +562,7 @@ export class WorldMap {
       if (f.properties.built && !f.properties.hidden) { s.built++; if (f.properties.id.startsWith('tw/')) s.total++; }
       m.set(n, s);
     }
-    return [...m.entries()].map(([neighbourhood, s]) => ({ neighbourhood, ...s }));
+    return [...m.entries()].map(([neighbourhood, s]) => ({ neighbourhood, district: this.districtOf(neighbourhood), ...s }));
   }
   builtIn(neighbourhood: string): number { let n = 0; for (const f of this.features.values()) if (f.properties.neighbourhood === neighbourhood && f.properties.built && !f.properties.hidden && f.properties.kind !== 'civic') n++; return n; }
 }
