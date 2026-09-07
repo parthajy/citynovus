@@ -30,6 +30,7 @@ function bufferLine(points, widthM) {
 }
 function classify(t) {
   if (t.building) return { kind: 'building' };
+  if (t.natural === 'wood' || t.natural === 'scrub' || t.landuse === 'forest' || t.landuse === 'orchard') return { kind: 'grove', dense: t.natural === 'wood' || t.landuse === 'forest' };
   if (t.natural === 'water' || t.landuse === 'reservoir') return { kind: 'pond' };
   if (t.leisure === 'playground' || t.leisure === 'pitch') return { kind: 'playground' };
   if (t.leisure === 'park' || t.leisure === 'garden' || t.landuse === 'grass' || t.landuse === 'recreation_ground') return { kind: 'park' };
@@ -89,11 +90,27 @@ console.log('pass 2: footprints');
 const outStream = createWriteStream(`${out}/osm.geojsonl`);
 const totals = new Map(); const counts = {};
 let n = 0;
+let trees = 0;
+const TREE_CAP = 60, TREE_M2 = 420;
+const rnd = (() => { let x = 1234567; return () => { x = (x * 1664525 + 1013904223) % 4294967296; return x / 4294967296; }; })();
+const octagon = (c, r) => { const kx = 111320 * Math.cos((c[1] * Math.PI) / 180); const o = []; for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; o.push([+(c[0] + (Math.cos(a) * r) / kx).toFixed(7), +(c[1] + (Math.sin(a) * r) / 111320).toFixed(7)]); } o.push(o[0]); return o; };
+const ringArea = (ring) => { const kx = 111320 * Math.cos((ring[0][1] * Math.PI) / 180); let a = 0; for (let i = 0; i < ring.length - 1; i++) a += (ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]); return Math.abs(a / 2) * kx * 111320; };
+const emitTree = (c, big) => { const r = (big ? 2.4 : 1.7) + rnd() * 1.4, h = (big ? 5 : 3.6) + rnd() * 2.5; outStream.write(JSON.stringify({ type: 'Feature', properties: { id: `t/${++trees}`, kind: 'osmtree', h: +h.toFixed(1), c: Math.floor(rnd() * 4) }, geometry: { type: 'Polygon', coordinates: [octagon(c, r)] } }) + '\n'); };
 await pass((f) => {
-  const t = f.properties || {}; const c = classify(t); if (!c) return;
+  const t = f.properties || {};
+  if (t.natural === 'tree' && f.geometry.type === 'Point') { emitTree(f.geometry.coordinates, true); return; }
+  const c = classify(t); if (!c) return;
   const g = f.geometry; let ring, line = null;
   if (c.kind === 'flyover') { if (g.type !== 'LineString' || g.coordinates.length < 2) return; line = g.coordinates.map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]); ring = bufferLine(g.coordinates, c.lanes * LANE_WIDTH); }
   else { const poly = g.type === 'Polygon' ? g.coordinates[0] : g.type === 'MultiPolygon' ? g.coordinates[0][0] : null; if (!poly || poly.length < 4) return; ring = poly.map(([x, y]) => [+x.toFixed(7), +y.toFixed(7)]); }
+  if (c.kind === 'grove') {
+    // scenery: the wood itself, plus a scatter of trees inside it (capped, so forests stay light)
+    outStream.write(JSON.stringify({ type: 'Feature', properties: { id: `g/${t['@id']}`, kind: 'grove' }, geometry: { type: 'Polygon', coordinates: [ring] } }) + '\n');
+    const area = ringArea(ring); const n = Math.min(TREE_CAP, Math.max(2, Math.round(area / (c.dense ? TREE_M2 : TREE_M2 * 2))));
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of ring) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    for (let k = 0, tries = 0; k < n && tries < n * 6; tries++) { const pt = [x0 + rnd() * (x1 - x0), y0 + rnd() * (y1 - y0)]; if (pip(pt, ring)) { emitTree(pt, c.dense); k++; } }
+    counts.grove = (counts.grove ?? 0) + 1; return;
+  }
   const cen = centroid(ring); const np = nearest(cen[0], cen[1]);
   const neighbourhood = np ? np.name : 'Unassigned';
   const tt = totals.get(neighbourhood) ?? { total: 0, x: 0, y: 0, district: np?.district ?? 'Assam' }; tt.total++; tt.x += cen[0]; tt.y += cen[1]; totals.set(neighbourhood, tt);
@@ -112,4 +129,4 @@ for (const t of totals.values()) { const d = dTotals.get(t.district) ?? { total:
 writeFileSync(`${out}/districts.json`, JSON.stringify(districts.map((d) => { const t = dTotals.get(d.name) ?? { total: 0, x: 0, y: 0 }; const c = t.total ? [+(t.x / t.total).toFixed(4), +(t.y / t.total).toFixed(4)] : [(d.bbox[0] + d.bbox[2]) / 2, (d.bbox[1] + d.bbox[3]) / 2]; return { name: d.name, total: t.total, c, bbox: d.bbox.map((v) => +v.toFixed(4)) }; }).sort((a, b) => b.total - a.total)));
 search.sort((a, b) => a.n.localeCompare(b.n));
 writeFileSync(`${out}/search.json`, JSON.stringify(search));
-console.log(`done: ${n} footprints`, counts, `| ${totals.size} neighbourhoods`);
+console.log(`done: ${n} footprints`, counts, `| ${trees} trees | ${totals.size} neighbourhoods`);

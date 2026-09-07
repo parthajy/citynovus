@@ -22,7 +22,10 @@ export function mountControls(root: HTMLElement, world: WorldMap, toast: (m: str
     else if (c === 'out') map.zoomOut();
     else if (c === 'compass') map.easeTo({ bearing: 0, duration: 500 });
     else if (c === 'tilt') world.toggle3D();
-    else if (c === 'iso') map.easeTo({ pitch: 60, bearing: 45, zoom: Math.max(map.getZoom(), 17), duration: 700 });
+    else if (c === 'iso') {
+      map.easeTo({ pitch: 60, bearing: 45, zoom: Math.max(map.getZoom(), 17), duration: 700 });
+      if (!world.satellite) { world.setSatellite(true); root.querySelector('[data-ctl="satellite"]')?.classList.add('on'); try { localStorage.setItem('tw.sat', '1'); } catch { /* ignore */ } }
+    }
     else if (c === 'satellite') {
       world.setSatellite(!world.satellite);
       b.classList.toggle('on', world.satellite);

@@ -6,6 +6,8 @@ import type { Footprint, Kind, Plot, Props } from './types';
 import { CITY, CIVIC_SHORT, COMMERCIAL_USES, CROPS, FLOOR_HEIGHT, FLYOVER_HEIGHT, GREY, HIDDEN, MAP_STYLE, MAX_PLANTS, MAX_TREES, NIGHT_STYLE, PALETTE, ROOF_COLOURS, SATELLITE_ATTRIBUTION, SATELLITE_TILES, TILES_URL, TREE_M2, cropStage, hoardingActive, lineWidth } from './config';
 import { centroid, circleRing, darken, insetRing, lineSegments, ringAreaM2, scatterInRing, seeded } from './geo';
 import { Traffic } from './traffic';
+import { Tint } from './tint';
+import { Billboards } from './billboards';
 
 maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
@@ -35,6 +37,7 @@ export interface WorldProps {
   hidden: boolean;
   provisional: boolean;
   sprite: string | null; // window pattern image for the walls
+  photo: string | null;
 }
 interface DecorProps { dk: 'roof' | 'slab' | 'band' | 'trunk' | 'canopy' | 'pier' | 'plant' | 'board' | 'deck' | 'model' | 'glow' | 'lot'; base: number; height: number; colour: string }
 
@@ -80,18 +83,45 @@ function squeezeRing(ring: Position[], s: number, along = 1): Position[] {
 }
 
 /** A repeating window sprite for extrusion walls: one wall colour, a grid of panes, lit or dark. */
-function windowSprite(wall: string, night: boolean, glass: string): ImageData | null {
+function windowSprite(wall: string, night: boolean, style: string | null): ImageData | null {
   const size = 48;
   const cv = document.createElement('canvas'); cv.width = size; cv.height = size;
   const ctx = cv.getContext('2d'); if (!ctx) return null;
   ctx.fillStyle = wall; ctx.fillRect(0, 0, size, size);
+  const seedA = wall.charCodeAt(1) + wall.charCodeAt(3);
+  // material: what the wall is made of, drawn under the windows
+  if (style === 'assam-type' || style === 'colonial' || style === 'shophouse') {
+    ctx.fillStyle = darken(wall, 0.9);
+    for (let y = 0; y < size; y += 4) for (let x = (y / 4) % 2 ? 0 : 4; x < size; x += 8) ctx.fillRect(x, y, 7, 3); // brick courses
+  } else if (style === 'rcc' || style === null) {
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    for (let k = 0; k < 6; k++) { const x = (seedA * (k + 3) * 7) % size; ctx.fillRect(x, 0, 1 + (k % 2), size); } // concrete streaks
+    ctx.fillStyle = darken(wall, 0.86); ctx.fillRect(0, 22, size, 2); // floor slab line
+  } else if (style === 'bamboo') {
+    ctx.fillStyle = darken(wall, 0.8);
+    for (let y = 0; y < size; y += 3) ctx.fillRect(0, y, size, 1); // weave
+    ctx.fillStyle = darken(wall, 0.7); ctx.fillRect(0, 0, size, 2); ctx.fillRect(0, 44, size, 4);
+  } else if (style === 'modern') {
+    ctx.fillStyle = night ? '#1d2531' : '#5d7f9c'; ctx.fillRect(0, 0, size, size); // curtain wall
+    ctx.fillStyle = night ? '#2b3644' : '#9dbdd6';
+    for (let y = 0; y < size; y += 12) for (let x = 0; x < size; x += 12) { ctx.fillRect(x + 1, y + 1, 10, 10); if (night && (x + y + seedA) % 24 === 0) { ctx.fillStyle = '#ffe08a'; ctx.fillRect(x + 1, y + 1, 10, 10); ctx.fillStyle = '#2b3644'; } }
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(0, 0, size, 3);
+    return ctx.getImageData(0, 0, size, size);
+  }
+  if (style === 'bamboo') return ctx.getImageData(0, 0, size, size);
   const cols = 3, rows = 2, pw = 8, ph = 11;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const x = Math.round((c + 0.5) * (size / cols) - pw / 2), y = Math.round((r + 0.5) * (size / rows) - ph / 2);
-    const lit = night && ((r * 3 + c + wall.length) % 3 !== 0);
+    const lit = night && ((r * 3 + c + seedA) % 3 !== 0);
+    if (style === 'shophouse' && r === rows - 1) { // ground-floor shutters
+      ctx.fillStyle = darken(wall, 0.6); ctx.fillRect(x - 2, y - 1, pw + 4, ph + 3);
+      ctx.fillStyle = darken(wall, 0.78); for (let k = 0; k < ph; k += 2) ctx.fillRect(x - 2, y + k, pw + 4, 1);
+      continue;
+    }
     ctx.fillStyle = darken(wall, 0.72); ctx.fillRect(x - 1, y - 1, pw + 2, ph + 2); // frame
-    ctx.fillStyle = night ? (lit ? '#ffe08a' : '#2a3140') : glass; ctx.fillRect(x, y, pw, ph);
+    ctx.fillStyle = night ? (lit ? '#ffe08a' : '#2a3140') : '#7fa7c9'; ctx.fillRect(x, y, pw, ph);
     if (!night) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x, y, pw, 3); }
+    if (style === 'colonial') { ctx.fillStyle = '#f5f0e6'; ctx.fillRect(x - 2, y + ph + 1, pw + 4, 1); ctx.fillRect(x - 2, y - 3, pw + 4, 1); } // sills and lintels
   }
   return ctx.getImageData(0, 0, size, size);
 }
@@ -120,6 +150,9 @@ export class WorldMap {
   private ready: Promise<void>;
   private sun: { azimuth: number; altitude: number } | null = null;
   private traffic: Traffic | null = null;
+  private tint: Tint | null = null;
+  private billboards: Billboards | null = null;
+  private shadowTimer: number | null = null;
   onSelect: (id: string | null) => void = () => {};
   /** Return true to swallow the click (used while tracing). */
   onMapClick: (lngLat: [number, number]) => boolean = () => false;
@@ -149,7 +182,7 @@ export class WorldMap {
         id, kind, neighbourhood,
         osm_floors: null, osm_name: null, osm_building: null, line: null,
         floors: 1, colour: null, wall: null, ground: null, commercial: false, name: null, roof: null, style: null, props: {},
-        hoarding: null, sign: null, civic: null, resolved: false, owner_name: null, built: false, hidden: false, provisional: false, sprite: null,
+        hoarding: null, sign: null, civic: null, resolved: false, owner_name: null, built: false, hidden: false, provisional: false, sprite: null, photo: null,
         ...extra,
       },
     };
@@ -206,17 +239,18 @@ export class WorldMap {
     set('osm-park', 'fill-color', n ? '#2c3d33' : '#e3ebdc');
     set('osm-water', 'fill-color', n ? '#2f4a6b' : '#dbe8f2'); set('osm-water-line', 'line-color', n ? '#3d5a7e' : '#b9cfe0');
     set('osm-flyover', 'fill-color', n ? '#3a4250' : '#dedede'); set('osm-flyover-line', 'line-color', n ? '#555f70' : '#b9b9b9');
-    set('osm-buildings', 'fill-extrusion-color', n ? '#6b7280' : GREY);
+    set('osm-buildings', 'fill-extrusion-color', ['coalesce', ['feature-state', 'tint'], n ? '#6b7280' : GREY]);
+    set('osm-grove', 'fill-color', n ? '#243128' : '#b7d49a');
+    set('shadows', 'fill-opacity', n ? 0 : ['interpolate', ['linear'], ['zoom'], 15, 0.12, 17, 0.22]);
     set('coverage', 'circle-color', n ? '#9fb3c8' : '#104050');
     this.loadSprites();
   }
   private loadSprites() {
-    const glass = '#7fa7c9';
-    for (const c of [...PALETTE, GREY]) for (const style of [null, 'modern', 'bamboo', 'colonial']) {
+    for (const c of [...PALETTE, GREY]) for (const style of [null, 'assam-type', 'rcc', 'shophouse', 'bamboo', 'colonial', 'modern']) {
       const wall = wallColour(c, style) ?? c;
-      const id = `win-${wall.slice(1)}-${this.night ? 'n' : 'd'}`;
+      const id = `win-${wall.slice(1)}-${style ?? 'plain'}-${this.night ? 'n' : 'd'}`;
       if (this.map.hasImage(id)) continue;
-      const img = windowSprite(wall, this.night, style === 'modern' ? '#5d7f9c' : glass);
+      const img = windowSprite(wall, this.night, style);
       if (img) this.map.addImage(id, img, { pixelRatio: 1 });
     }
   }
@@ -254,6 +288,7 @@ export class WorldMap {
     this.map.addLayer({ id: 'coverage-labels', type: 'symbol', source: 'coverage', minzoom: 8, maxzoom: OSM_MINZOOM, filter: ['>=', ['get', 'total'], 200], layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.2] }, paint: { 'text-color': '#104050', 'text-halo-color': '#fff', 'text-halo-width': 1.2 } });
 
     // Grey Assam: everything OSM knows, from tiles.
+    this.map.addLayer({ id: 'osm-grove', type: 'fill', ...osm, filter: kind('grove' as Kind), paint: { 'fill-color': this.night ? '#243128' : '#b7d49a', 'fill-opacity': 0.85 } });
     this.map.addLayer({ id: 'osm-park', type: 'fill', ...osm, filter: kind('park', 'playground'), paint: { 'fill-color': '#e3ebdc', 'fill-opacity': ['case', taken, 0, 0.9] } });
     this.map.addLayer({ id: 'osm-water', type: 'fill', ...osm, filter: kind('pond'), paint: { 'fill-color': '#dbe8f2', 'fill-opacity': ['case', taken, 0, 0.95] } });
     this.map.addLayer({ id: 'osm-water-line', type: 'line', ...osm, filter: kind('pond'), paint: { 'line-color': '#b9cfe0', 'line-width': 1, 'line-opacity': ['case', taken, 0, 1] } });
@@ -278,13 +313,21 @@ export class WorldMap {
     this.map.addLayer({ id: 'wall-flat', type: 'line', source: 'world', filter: all(kind('wall'), not(built)), paint: { 'line-color': '#b9b1a3', 'line-width': 1.5, 'line-dasharray': [2, 2] } });
     this.map.addLayer({ id: 'lots', type: 'fill', source: 'decor', filter: ['==', ['get', 'dk'], 'lot'], paint: { 'fill-color': ['get', 'colour'], 'fill-opacity': 0.9 } }, 'park-fill');
     this.map.addLayer({ id: 'lots-line', type: 'line', source: 'decor', filter: ['==', ['get', 'dk'], 'lot'], paint: { 'line-color': ['get', 'colour'], 'line-width': 1, 'line-opacity': 0.6 } }, 'park-fill');
+    // Sun shadows: one dark polygon per building, cast from the sun's azimuth and altitude.
+    this.map.addSource('shadows', { type: 'geojson', data: EMPTY });
+    this.map.addLayer({ id: 'shadows', type: 'fill', source: 'shadows', minzoom: 15, paint: { 'fill-color': '#0b1a2a', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0.12, 17, 0.22] } });
     this.map.addLayer({ id: 'glow', type: 'fill-extrusion', source: 'decor', filter: ['==', ['get', 'dk'], 'glow'], paint: { 'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': 0, 'fill-extrusion-height': 0.05, 'fill-extrusion-opacity': 0.35 } });
     this.map.addLayer({ id: 'walls-3d', type: 'fill-extrusion', source: 'world', filter: all(kind('wall'), built), paint: { 'fill-extrusion-color': ['case', hidden, HIDDEN, '#b8a48c'], 'fill-extrusion-height': 2, 'fill-extrusion-opacity': 0.95 } });
     this.map.addLayer({ id: 'decor-ground', type: 'fill-extrusion', source: 'decor', filter: ['in', ['get', 'dk'], ['literal', ['trunk', 'canopy', 'pier', 'plant', 'model']]], paint: { 'fill-extrusion-color': ['get', 'colour'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.95 } });
 
     // Grey buildings from tiles: a claimed one drops to zero height so the coloured one shows through.
+    // Trees OSM knows about (woods, orchards, single trees): scenery, straight from the tiles.
+    this.map.addLayer({ id: 'osm-trees', type: 'fill-extrusion', ...osm, filter: kind('osmtree' as Kind), minzoom: 14, paint: {
+      'fill-extrusion-color': ['match', ['get', 'c'], 0, CANOPY[0], 1, CANOPY[1], 2, CANOPY[2], CANOPY[3]],
+      'fill-extrusion-base': 1.6, 'fill-extrusion-height': ['coalesce', ['get', 'h'], 5], 'fill-extrusion-opacity': 0.95,
+    } });
     this.map.addLayer({ id: 'osm-buildings', type: 'fill-extrusion', ...osm, filter: kind('building'), paint: {
-      'fill-extrusion-color': GREY,
+      'fill-extrusion-color': ['coalesce', ['feature-state', 'tint'], GREY],
       'fill-extrusion-height': ['case', taken, 0, ['*', ['coalesce', ['get', 'osm_floors'], 1], FLOOR_HEIGHT]],
       'fill-extrusion-opacity': 0.94,
       'fill-extrusion-vertical-gradient': true,
@@ -326,6 +369,13 @@ export class WorldMap {
     for (const id of this.features.keys()) if (!id.startsWith('tw/')) this.map.setFeatureState({ source: 'osm', sourceLayer: 'osm', id }, { taken: true });
     this.traffic = new Traffic(this.map, () => this.night);
     this.traffic.start();
+    this.tint = new Tint(this.map, () => this.night);
+    this.tint.start();
+    this.billboards = new Billboards(this.map, () => this.collection().features.filter((f) => f.properties.photo && f.properties.built && !f.properties.hidden).map((f) => ({ id: f.properties.id, url: f.properties.photo!, at: centroid(f.geometry.coordinates[0]), height: f.properties.kind === 'building' ? f.properties.floors * FLOOR_HEIGHT : 3 })));
+    this.billboards.start();
+    this.map.on('moveend', () => this.queueShadows());
+    this.map.on('idle', () => { if (this.shadowTimer === -1) this.queueShadows(); });
+    this.queueShadows();
 
     const worldPick = ['buildings-3d', 'buildings-win', 'ground-3d', 'walls-3d', 'flyover-flat', 'tree-fill', 'point-fill', 'rail-fill', 'farm-fill', 'water-fill', 'park-fill', 'road-fill'];
     const osmPick = ['osm-buildings', 'osm-flyover', 'osm-water', 'osm-park'];
@@ -378,6 +428,7 @@ export class WorldMap {
   setSatellite(on: boolean) {
     this.satellite = on;
     if (!this.map.loaded()) return;
+    this.refresh();
     this.addSatellite();
     this.map.setLayoutProperty('satellite', 'visibility', on ? 'visible' : 'none');
     this.applyGroundOpacity();
@@ -407,7 +458,47 @@ export class WorldMap {
         : { 'sky-color': sun && sun.altitude < 12 ? '#f4b9a0' : '#bcd6ee', 'horizon-color': '#f2ede4', 'fog-color': '#f5f0e6', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.7, 'fog-ground-blend': 0.85, 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 12, 1, 16, 0.35] });
     } catch { /* older style spec */ }
   }
-  setSun(sun: { azimuth: number; altitude: number }) { this.sun = sun; if (this.map.loaded()) this.applyAtmosphere(); }
+  setSun(sun: { azimuth: number; altitude: number }) { this.sun = sun; if (this.map.loaded()) { this.applyAtmosphere(); this.queueShadows(); } }
+
+  private queueShadows() {
+    if (this.shadowTimer !== null && this.shadowTimer > 0) clearTimeout(this.shadowTimer);
+    this.shadowTimer = window.setTimeout(() => { this.shadowTimer = null; this.renderShadows(); }, 120);
+  }
+  /** Every building on screen throws a shadow: its footprint swept along the sun's shadow vector, as one polygon. */
+  private renderShadows() {
+    const src = this.map.getSource('shadows') as maplibregl.GeoJSONSource | undefined; if (!src) return;
+    const sun = this.sun;
+    if (!sun || sun.altitude < 3 || this.night || this.map.getZoom() < 15) { src.setData(EMPTY); return; }
+    const len = Math.min(6, 1 / Math.tan((sun.altitude * Math.PI) / 180)); // shadow length per metre of height, capped at dawn/dusk
+    const dir = ((sun.azimuth + 180) * Math.PI) / 180; // away from the sun; azimuth measured clockwise from north
+    const sx = Math.sin(dir) * len, sy = Math.cos(dir) * len;
+    const out: Feature<Polygon>[] = [];
+    const sweep = (ring: Position[], h: number) => {
+      const kx = 111320 * Math.cos((ring[0][1] * Math.PI) / 180), ky = 111320;
+      const dx = (sx * h) / kx, dy = (sy * h) / ky;
+      // hull of the footprint and its shifted copy: monotone chain on the union of points
+      const pts: Position[] = [];
+      for (const [x, y] of ring) { pts.push([x, y], [x + dx, y + dy]); }
+      pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cross = (o: Position, a: Position, b: Position) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lower: Position[] = []; for (const p of pts) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+      const upper: Position[] = []; for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+      const hull = lower.slice(0, -1).concat(upper.slice(0, -1)); hull.push(hull[0]);
+      out.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [hull] } });
+    };
+    let n = 0;
+    for (const f of this.features.values()) { const p = f.properties; if (p.kind !== 'building' || p.hidden) continue; sweep(f.geometry.coordinates[0], (p.built ? p.floors : p.osm_floors ?? 1) * FLOOR_HEIGHT); n++; }
+    if (this.map.getSource('osm')) {
+      const seen = new Set<string>();
+      for (const f of this.map.queryRenderedFeatures({ layers: ['osm-buildings'] })) {
+        const id = String(f.properties.id); if (seen.has(id) || this.features.has(id) || f.geometry.type !== 'Polygon') continue; seen.add(id);
+        const floors = (f.properties.osm_floors as number | null) ?? 1;
+        sweep(f.geometry.coordinates[0], floors * FLOOR_HEIGHT);
+        if (++n > 2500) break;
+      }
+    }
+    src.setData({ type: 'FeatureCollection', features: out });
+  }
 
   async setNight(night: boolean) {
     if (this.night === night) return;
@@ -459,6 +550,8 @@ export class WorldMap {
     }
   }
   private push() {
+    this.billboards?.refresh();
+    this.queueShadows();
     (this.map.getSource('world') as maplibregl.GeoJSONSource | undefined)?.setData(this.collection());
     (this.map.getSource('decor') as maplibregl.GeoJSONSource | undefined)?.setData(this.decor());
     (this.map.getSource('lines') as maplibregl.GeoJSONSource | undefined)?.setData(this.lines());
@@ -530,6 +623,7 @@ export class WorldMap {
         let top = p.floors * FLOOR_HEIGHT;
         const roofBase = top;
         if (!this.satellite) add(insetRing(ring, 1.28), { dk: 'lot', base: 0, height: 0, colour: this.night ? '#2f3d33' : '#a9d18e' });
+        add(insetRing(ring, 1.015), { dk: 'slab', base: 0, height: 0.45, colour: darken(wall, 0.55) }); // contact shadow where wall meets ground
         if (p.roof === 'tin' || p.roof === 'tiled' || p.roof === 'thatch') {
           // gable: an eave overhang, then steps that shrink across the long axis up to a ridge
           const eave = p.roof === 'thatch' ? 1.12 : 1.06;
@@ -619,11 +713,12 @@ export class WorldMap {
     p.hidden = b.hidden;
     p.provisional = !!b.provisional;
     p.sprite = this.spriteFor(p);
+    p.photo = b.photo_url ?? null;
     if (push) this.push();
   }
   private spriteFor(p: WorldProps): string | null {
-    if (p.kind !== 'building' || !p.built || p.hidden || !p.wall || p.style === 'bamboo') return null;
-    const id = `win-${p.wall.slice(1)}-${this.night ? 'n' : 'd'}`;
+    if (p.kind !== 'building' || !p.built || p.hidden || !p.wall) return null;
+    const id = `win-${p.wall.slice(1)}-${p.style ?? 'plain'}-${this.night ? 'n' : 'd'}`;
     return this.map.hasImage(id) ? id : null;
   }
 

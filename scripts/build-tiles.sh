@@ -10,7 +10,7 @@ OUT="${OUT:-public/data}"
 echo "1/4 clipping Assam out of $PBF"
 osmium extract -p "$BOUNDARY" -s smart "$PBF" -o "$WORK/assam.osm.pbf" --overwrite
 echo "2/4 keeping only what the map needs"
-osmium tags-filter "$WORK/assam.osm.pbf" w/building w/natural=water w/landuse=reservoir,grass,recreation_ground w/leisure=park,garden,playground,pitch w/bridge=yes n/place w/highway n/amenity w/amenity n/shop w/shop n/tourism w/tourism n/historic w/historic n/railway=station -o "$WORK/filtered.osm.pbf" --overwrite
+osmium tags-filter "$WORK/assam.osm.pbf" w/building w/natural=water,wood,scrub w/landuse=forest,orchard n/natural=tree w/landuse=reservoir,grass,recreation_ground w/leisure=park,garden,playground,pitch w/bridge=yes n/place w/highway n/amenity w/amenity n/shop w/shop n/tourism w/tourism n/historic w/historic n/railway=station -o "$WORK/filtered.osm.pbf" --overwrite
 osmium export "$WORK/filtered.osm.pbf" -c scripts/tiles-export.json -f geojsonseq -o "$WORK/export.geojsonl" --overwrite
 echo "3/4 preparing footprints, places, neighbourhoods, search"
 node scripts/tiles-prepare.mjs "$WORK/export.geojsonl" "$OUT"
