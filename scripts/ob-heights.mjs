@@ -25,9 +25,10 @@ for (const mf of manifests) {
 }
 console.log(tiles.length, 'rasters in manifests');
 const byProj = new Map(); for (const t of tiles) { if (!byProj.has(t.proj)) byProj.set(t.proj, []); byProj.get(t.proj).push(t); }
-const index = new Map(); // `${proj}|${ix}|${iy}` -> tile
-for (const t of tiles) index.set(`${t.proj}|${Math.round(t.x0 / 12500)}|${Math.round(t.y1 / 12500)}`, t);
-const find = (lon, lat) => { for (const [proj] of byProj) { const [x, y] = proj4(proj, [lon, lat]); const t = index.get(`${proj}|${Math.floor(x / 12500)}|${Math.ceil(y / 12500)}`); if (t && x >= t.x0 && x < t.x0 + t.w * t.scale && y <= t.y1 && y > t.y1 - t.h * t.scale) return { t, x, y }; } return null; };
+// Rasters are not aligned to a grid, so hash each one into every 12.5 km cell it touches and test bounds exactly.
+const CELL = 12500, index = new Map();
+for (const t of tiles) { const x1 = t.x0 + t.w * t.scale, y0 = t.y1 - t.h * Math.abs(t.scale); for (let cx = Math.floor(t.x0 / CELL); cx <= Math.floor(x1 / CELL); cx++) for (let cy = Math.floor(y0 / CELL); cy <= Math.floor(t.y1 / CELL); cy++) { const k = `${t.proj}|${cx}|${cy}`; if (!index.has(k)) index.set(k, []); index.get(k).push(t); } }
+const find = (lon, lat) => { for (const [proj] of byProj) { const [x, y] = proj4(proj, [lon, lat]); for (const t of index.get(`${proj}|${Math.floor(x / CELL)}|${Math.floor(y / CELL)}`) ?? []) if (x >= t.x0 && x < t.x0 + t.w * t.scale && y <= t.y1 && y > t.y1 - t.h * Math.abs(t.scale)) return { t, x, y }; } return null; };
 
 console.log('pass 1: bucketing footprints by raster');
 let n = 0;
@@ -51,15 +52,15 @@ for (const [i, t] of chosen.entries()) {
     const count = await tiff.getImageCount();
     let pick = 0; for (let k = 0; k < count; k++) { const im = await tiff.getImage(k); if (im.getWidth() >= 1500 && im.getWidth() < 3200) { pick = k; break; } if (im.getWidth() >= 3200) pick = k; }
     const im = await tiff.getImage(pick); const W = im.getWidth(), H = im.getHeight();
-    const [presence, height] = await im.readRasters({ samples: [0, 1] });
+    const [height] = await im.readRasters({ samples: [1] }); // band 1 is building height in metres; presence averages away at this overview
     const px = (t.w * t.scale) / W, py = (t.h * Math.abs(t.scale)) / H;
     let hit = 0;
     for (const [id, x, y, osm] of t.buildings) {
       if (osm) continue; // OSM already knows
       const cx = Math.floor((x - t.x0) / px), cy = Math.floor((t.y1 - y) / py);
-      let best = 0, p = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = cx + dx, Y = cy + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) continue; const k = Y * W + X; if (height[k] > best) { best = height[k]; p = presence[k]; } }
-      if (p < 0.25 || best < 2.4) continue;
+      let best = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = cx + dx, Y = cy + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) continue; const k = Y * W + X; if (height[k] > best) best = height[k]; }
+      if (best < 2.4) continue;
       heights[id] = Math.max(1, Math.min(40, Math.round(best / FLOOR_M))); hit++;
     }
     got += hit;

@@ -38,8 +38,17 @@ curl -O https://download.geofabrik.de/asia/india-latest.osm.pbf   # 1.7 GB
 scripts/build-tiles.sh india-latest.osm.pbf scripts/assam-boundary.geojson
 ```
 
+Real building heights come from Google's Open Buildings 2.5D Temporal rasters (CC BY 4.0). `scripts/ob-heights.mjs`
+reads a coarse overview of the rasters that hold the most footprints straight from Google's bucket, samples the
+height under each footprint, and writes `heights.json`; the prepare step uses it wherever OSM has no `building:levels`:
+
+```bash
+node scripts/ob-heights.mjs work/osm.geojsonl public/data manifests/*.json   # manifests from gs://open-buildings-temporal-data/v1/manifests
+```
+
 That clips Assam out of the India extract (OSM relation 2025886, saved in `scripts/assam-boundary.geojson`),
-keeps buildings, water, parks, playgrounds and bridges, and writes `assam.pmtiles` plus
+keeps buildings, water, parks, playgrounds, bridges, woods, orchards and single trees (the woods are scattered
+with trees as scenery), and writes `assam.pmtiles` plus
 `places.json` (named places), `neighbourhoods.json` (per-place totals for the leaderboard)
 and `search.json` (roads, places and points of interest for the search box). Takes about five
 minutes on a laptop. Another state is the same script with a different boundary; the client

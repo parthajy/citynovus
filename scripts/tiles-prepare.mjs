@@ -8,6 +8,10 @@ import { createReadStream, mkdirSync, writeFileSync, createWriteStream, existsSy
 import { createInterface } from 'node:readline';
 
 const [,, input, out = 'public/data', districtsFile = 'scripts/assam-districts.geojson'] = process.argv;
+// Real heights from Google Open Buildings 2.5D (scripts/ob-heights.mjs), used where OSM has no building:levels.
+const heightsFile = process.env.HEIGHTS_FILE ?? `${out}/heights.json`;
+const obHeights = existsSync(heightsFile) ? JSON.parse(readFileSync(heightsFile, 'utf8')) : {};
+console.log(`${Object.keys(obHeights).length} footprints with measured heights`);
 if (!input) { console.error('usage: node scripts/tiles-prepare.mjs export.geojsonl [outdir]'); process.exit(1); }
 mkdirSync(out, { recursive: true });
 const LANE_WIDTH = 3.5;
@@ -116,7 +120,11 @@ await pass((f) => {
   const tt = totals.get(neighbourhood) ?? { total: 0, x: 0, y: 0, district: np?.district ?? 'Assam' }; tt.total++; tt.x += cen[0]; tt.y += cen[1]; totals.set(neighbourhood, tt);
   counts[c.kind] = (counts[c.kind] ?? 0) + 1;
   const levels = parseInt(t['building:levels'] ?? '', 10);
-  const props = { id: `${t['@type'] === 'relation' ? 'rel' : 'way'}/${t['@id']}`, kind: c.kind, neighbourhood, osm_floors: c.kind === 'building' && Number.isFinite(levels) ? Math.min(levels, 60) : null, osm_name: t.name ?? null, osm_building: t.building && t.building !== 'yes' ? t.building : null };
+  const id = `${t['@type'] === 'relation' ? 'rel' : 'way'}/${t['@id']}`;
+  const measured = c.kind === 'building' && !Number.isFinite(levels) ? obHeights[id] : undefined;
+  if (measured) counts.measured = (counts.measured ?? 0) + 1;
+  const props = { id, kind: c.kind, neighbourhood, osm_floors: c.kind === 'building' && Number.isFinite(levels) ? Math.min(levels, 60) : (measured ?? null), osm_name: t.name ?? null, osm_building: t.building && t.building !== 'yes' ? t.building : null };
+  if (measured) props.measured = 1;
   if (c.kind === 'flyover') { props.lanes = c.lanes; props.line = JSON.stringify(line); }
   outStream.write(JSON.stringify({ type: 'Feature', properties: props, geometry: { type: 'Polygon', coordinates: [ring] } }) + '\n');
   if (++n % 100000 === 0) console.log(`  ${n} features`);
