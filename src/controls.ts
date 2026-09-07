@@ -7,6 +7,7 @@ export function mountControls(root: HTMLElement, world: WorldMap, toast: (m: str
     <button class="btn icon fab-mini" data-ctl="out" title="Zoom out"><span class="ms">remove</span></button>
     <button class="btn icon fab-mini" data-ctl="compass" title="Reset north"><span class="ms compass">navigation</span></button>
     <button class="btn icon fab-mini" data-ctl="tilt" title="Tilt 3D / flat"><span class="ms">3d_rotation</span></button>
+    <button class="btn icon fab-mini" data-ctl="iso" title="Toy-city view"><span class="ms">deployed_code</span></button>
     <button class="btn icon fab-mini" data-ctl="satellite" title="Satellite imagery"><span class="ms">satellite_alt</span></button>
     <button class="btn icon fab-mini" data-ctl="locate" title="Where am I"><span class="ms">my_location</span></button>`;
   const map = world.map;
@@ -21,6 +22,7 @@ export function mountControls(root: HTMLElement, world: WorldMap, toast: (m: str
     else if (c === 'out') map.zoomOut();
     else if (c === 'compass') map.easeTo({ bearing: 0, duration: 500 });
     else if (c === 'tilt') world.toggle3D();
+    else if (c === 'iso') map.easeTo({ pitch: 60, bearing: 45, zoom: Math.max(map.getZoom(), 17), duration: 700 });
     else if (c === 'satellite') {
       world.setSatellite(!world.satellite);
       b.classList.toggle('on', world.satellite);
