@@ -226,6 +226,7 @@ export class WorldMap {
     for (const b of states) this.mergeState(b, false);
 
     this.toyBasemap();
+    for (const f of this.features.values()) f.properties.sprite = this.spriteFor(f.properties); // stored plots arrived before the sprites did
     this.applyAtmosphere();
 
     this.map.addSource('osm', { type: 'vector', url: `pmtiles://${TILES_URL}`, promoteId: { osm: 'id' }, minzoom: OSM_MINZOOM, maxzoom: 15 });
