@@ -169,7 +169,7 @@ export class WorldMap {
       maxBounds: CITY.bounds,
       attributionControl: false,
     });
-    this.map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Building heights © Google Open Buildings (CC BY 4.0)' }), 'bottom-left');
+    this.map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
     this.ready = new Promise((res) => this.map.once('load', () => res()));
     this.map.on('styleimagemissing', (e) => { if (!this.map.hasImage(e.id)) this.map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) }); });
   }
